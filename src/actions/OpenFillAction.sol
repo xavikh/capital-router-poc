@@ -9,7 +9,7 @@ import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol"
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
-import {IStepAction} from "../interfaces/IStepAction.sol";
+import {IStageAction} from "../interfaces/IStageAction.sol";
 import {IBudget, ICheckpointedBudget} from "../interfaces/IBudget.sol";
 import {IFiller} from "../interfaces/IFiller.sol";
 import {Plan} from "../lib/types.sol";
@@ -23,8 +23,8 @@ import {MANAGER_PERMISSION_ID, EXCHANGE_RATE_SCALE} from "../lib/constants.sol";
 ///      worst acceptable price. Price terms are 1e18-scaled: `demanded_raw * 1e18 / offered_raw`.
 ///      Changing either price term restarts the auction, so a filler cannot take an offer that
 ///      accumulated under the old terms at the new price.
-contract OpenFillAction is IStepAction, Initializable, DaoAuthorizableUpgradeable {
-    /// @inheritdoc IStepAction
+contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeable {
+    /// @inheritdoc IStageAction
     IBudget public budget;
 
     /// @notice The token the DAO must receive back
@@ -90,11 +90,11 @@ contract OpenFillAction is IStepAction, Initializable, DaoAuthorizableUpgradeabl
 
     // IStepAction
 
-    /// @inheritdoc IStepAction
+    /// @inheritdoc IStageAction
     /// @dev None in v1
     function preconditions(address, Plan calldata) external view virtual {}
 
-    /// @inheritdoc IStepAction
+    /// @inheritdoc IStageAction
     /// @dev Approves the offer to the caller, calls it back, and clears the approval
     function build(address _caller, bytes calldata _data, Plan calldata _draft)
         external
@@ -105,7 +105,13 @@ contract OpenFillAction is IStepAction, Initializable, DaoAuthorizableUpgradeabl
         uint256 _offered = Math.min(_draft.inAmount, maxOffered());
         if (_offered == 0) return (_plan, _actions);
 
-        _plan = Plan({inToken: _draft.inToken, inAmount: _offered, outToken: demandedToken, outAmount: demandPerFill});
+        _plan = Plan({
+            inToken: _draft.inToken,
+            inAmount: _offered,
+            outToken: demandedToken,
+            outAmount: demandPerFill,
+            beneficiary: _draft.beneficiary
+        });
 
         address _in = address(_draft.inToken);
         _actions = new Action[](3);
@@ -118,7 +124,7 @@ contract OpenFillAction is IStepAction, Initializable, DaoAuthorizableUpgradeabl
         _actions[2] = Action({to: _in, value: 0, data: abi.encodeCall(IERC20.approve, (_caller, 0))});
     }
 
-    /// @inheritdoc IStepAction
+    /// @inheritdoc IStageAction
     /// @dev Reverts the whole step unless the DAO received at least `outAmount`
     function postconditions(address, Plan calldata _plan) external view virtual returns (Action[] memory _actions) {
         uint256 _minBalance = _plan.outToken.balanceOf(address(dao())) + _plan.outAmount;

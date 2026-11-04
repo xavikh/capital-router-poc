@@ -12,7 +12,7 @@ import {FundedStreamBudget} from "../budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../actions/OpenFillAction.sol";
 import {RatioSplitter} from "../splitters/RatioSplitter.sol";
 import {ICheckpointedBudget} from "../interfaces/IBudget.sol";
-import {Step} from "../lib/types.sol";
+import {Stage} from "../lib/types.sol";
 import {
     TRIGGER_PERMISSION_ID,
     CONFIGURE_PERMISSION_ID,
@@ -21,8 +21,8 @@ import {
 } from "../lib/constants.sol";
 
 /// @title CapitalPipelinePluginSetup
-/// @notice Installs a plugin with one swap-and-split step: FundedStreamBudget → OpenFillAction →
-///         RatioSplitter. Deploys every component as a clone bound to the installing DAO.
+/// @notice Installs a plugin with a swap-and-split flow: FundedStreamBudget, then one stage of
+///         OpenFillAction → RatioSplitter. Deploys every component as a clone bound to the installing DAO.
 contract CapitalPipelinePluginSetup is PluginSetup {
     /// @notice Installation parameters
     struct InstallParams {
@@ -64,15 +64,12 @@ contract CapitalPipelinePluginSetup is PluginSetup {
 
         address[] memory _helpers = _deployComponents(IDAO(_dao), _params);
 
-        Step[] memory _steps = new Step[](1);
-        _steps[0] = Step({
-            budget: FundedStreamBudget(_helpers[0]),
-            action: OpenFillAction(_helpers[1]),
-            splitter: RatioSplitter(_helpers[2])
-        });
+        Stage[] memory _stages = new Stage[](1);
+        _stages[0] = Stage({action: OpenFillAction(_helpers[1]), splitter: RatioSplitter(_helpers[2])});
 
         plugin = ProxyLib.deployMinimalProxy(
-            implementation(), abi.encodeCall(CapitalPipelinePlugin.initialize, (IDAO(_dao), _steps))
+            implementation(),
+            abi.encodeCall(CapitalPipelinePlugin.initialize, (IDAO(_dao), FundedStreamBudget(_helpers[0]), _stages))
         );
 
         preparedSetupData.helpers = _helpers;

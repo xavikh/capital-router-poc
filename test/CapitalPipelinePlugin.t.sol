@@ -9,9 +9,8 @@ import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
 import {IBudget} from "../src/interfaces/IBudget.sol";
-import {IStepAction} from "../src/interfaces/IStepAction.sol";
-import {ISplitter} from "../src/interfaces/ISplitter.sol";
-import {Step} from "../src/lib/types.sol";
+import {IStageAction} from "../src/interfaces/IStageAction.sol";
+import {Stage} from "../src/lib/types.sol";
 import {CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
@@ -29,7 +28,7 @@ contract CapitalPipelinePluginTest is Fixture {
         budget = _deployBudget(RATE, 0);
         action = _deployAction(budget);
         splitter = _deploySplitter();
-        plugin = _deployPlugin(_steps(budget, action, splitter));
+        plugin = _deployPlugin(budget, _one(action, splitter));
 
         filler = new MockFiller(plugin);
         tokenB.mint(address(filler), 1_000_000 ether);
@@ -39,20 +38,20 @@ contract CapitalPipelinePluginTest is Fixture {
 
     // Configuration
 
-    function test_StoresSteps() public view {
-        Step[] memory _stored = plugin.steps();
+    function test_StoresTheFlow() public view {
+        Stage[] memory _stored = plugin.stages();
 
+        assertEq(address(plugin.budget()), address(budget));
         assertEq(_stored.length, 1);
-        assertEq(address(_stored[0].budget), address(budget));
         assertEq(address(_stored[0].action), address(action));
         assertEq(address(_stored[0].splitter), address(splitter));
     }
 
-    function test_DaoReplacesSteps() public {
+    function test_DaoReplacesTheFlow() public {
         vm.prank(address(dao));
-        plugin.setSteps(_steps(budget, IStepAction(address(0)), ISplitter(address(0))));
+        plugin.setFlow(budget, _one(NO_ACTION, splitter));
 
-        assertEq(address(plugin.steps()[0].action), address(0));
+        assertEq(address(plugin.stages()[0].action), address(0));
     }
 
     function test_ManagerPausesAndUnpauses() public {
@@ -74,28 +73,35 @@ contract CapitalPipelinePluginTest is Fixture {
         plugin.pause();
     }
 
-    function test_RevertWhen_ManagerSetsSteps() public {
+    function test_RevertWhen_ManagerSetsTheFlow() public {
         vm.expectRevert(
             abi.encodeWithSelector(
                 DaoUnauthorized.selector, address(dao), address(plugin), manager, CONFIGURE_PERMISSION_ID
             )
         );
         vm.prank(manager);
-        plugin.setSteps(_steps(budget, action, splitter));
+        plugin.setFlow(budget, _one(action, splitter));
     }
 
-    function test_RevertWhen_NoSteps() public {
+    function test_RevertWhen_NoBudget() public {
         CapitalPipelinePlugin _plugin = _clone();
 
-        vm.expectRevert(CapitalPipelinePlugin.NoSteps.selector);
-        _plugin.initialize(dao, new Step[](0));
+        vm.expectRevert(CapitalPipelinePlugin.NoBudget.selector);
+        _plugin.initialize(dao, IBudget(address(0)), _one(action, splitter));
     }
 
-    function test_RevertWhen_StepHasNoBudget() public {
+    function test_RevertWhen_NoStages() public {
         CapitalPipelinePlugin _plugin = _clone();
 
-        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.NoBudget.selector, 0));
-        _plugin.initialize(dao, _steps(IBudget(address(0)), action, splitter));
+        vm.expectRevert(CapitalPipelinePlugin.NoStages.selector);
+        _plugin.initialize(dao, budget, new Stage[](0));
+    }
+
+    function test_RevertWhen_StageIsEmpty() public {
+        CapitalPipelinePlugin _plugin = _clone();
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.EmptyStage.selector, 0));
+        _plugin.initialize(dao, budget, _one(NO_ACTION, NO_SPLITTER));
     }
 
     function test_RevertWhen_ActionBoundToAnotherBudget() public {
@@ -103,7 +109,15 @@ contract CapitalPipelinePluginTest is Fixture {
 
         vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 0));
         vm.prank(address(dao));
-        plugin.setSteps(_steps(_other, action, splitter));
+        plugin.setFlow(_other, _one(action, splitter));
+    }
+
+    function test_RevertWhen_BoundActionIsNotTheFirstStage() public {
+        Stage[] memory _flow = _two(NO_ACTION, _deployRatio(address(dao)), action, splitter);
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 1));
+        vm.prank(address(dao));
+        plugin.setFlow(budget, _flow);
     }
 
     // Trigger
@@ -138,23 +152,23 @@ contract CapitalPipelinePluginTest is Fixture {
         assertEq(budget.available(), RATE, "offer not consumed");
     }
 
-    function test_StepWithoutActionTransfersTheBudget() public {
+    function test_StageWithoutActionPaysOutTheBudget() public {
         FundedStreamBudget _budget = _deployBudget(RATE, 0);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(_budget, IStepAction(address(0)), splitter));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _one(NO_ACTION, splitter));
         vm.warp(block.timestamp + EPOCH);
 
-        _plugin.trigger(new bytes[](0));
+        _plugin.trigger(noData);
 
         assertEq(tokenA.balanceOf(BURN), 9.5 ether);
         assertEq(tokenA.balanceOf(fee), 0.5 ether);
         assertEq(_budget.available(), 0);
     }
 
-    function test_PreconditionsCanBlockAStep() public {
-        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.Block), splitter));
+    function test_PreconditionsCanBlockAStage() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.Block), splitter));
 
         vm.expectRevert(BadAction.Blocked.selector);
-        _plugin.trigger(new bytes[](0));
+        _plugin.trigger(noData);
     }
 
     function test_RevertWhen_Paused() public {
@@ -170,30 +184,34 @@ contract CapitalPipelinePluginTest is Fixture {
         plugin.trigger(new bytes[](2));
     }
 
-    function test_RevertWhen_ActionSpendsMoreThanTheBudget() public {
-        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.Overspend), splitter));
+    function test_RevertWhen_ActionSpendsMoreThanItsInput() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.Overspend), splitter));
 
-        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.InAmountExceedsBudget.selector, 0, RATE + 1, RATE));
-        _plugin.trigger(new bytes[](0));
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.InAmountExceedsInput.selector, 0, RATE + 1, RATE));
+        _plugin.trigger(noData);
+    }
+
+    function test_RevertWhen_ActionChangesTheInputToken() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.SwapInputToken), splitter));
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.InputTokenMismatch.selector, 0));
+        _plugin.trigger(noData);
     }
 
     function test_RevertWhen_AllocationsExceedTheOutput() public {
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(_steps(budget, IStepAction(address(0)), new OverAllocatingSplitter()));
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(NO_ACTION, new OverAllocatingSplitter()));
 
         vm.expectRevert(
             abi.encodeWithSelector(CapitalPipelinePlugin.AllocationExceedsOutput.selector, 0, RATE + 1, RATE)
         );
-        _plugin.trigger(new bytes[](0));
+        _plugin.trigger(noData);
     }
 
-    // Guards
-
     function test_RevertWhen_AnActionTargetsTheDao() public {
-        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.TargetDao), splitter));
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.TargetDao), splitter));
 
         vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.ActionTargetsDao.selector, 0, 0));
-        _plugin.trigger(new bytes[](0));
+        _plugin.trigger(noData);
     }
 
     function test_FillerCannotReenterTrigger() public {
@@ -205,8 +223,108 @@ contract CapitalPipelinePluginTest is Fixture {
         assertEq(tokenB.balanceOf(BURN), 950 ether, "the outer fill still completes");
     }
 
-    function _bad(BadAction.Mode _mode) internal returns (IStepAction) {
-        return new BadAction(_mode, address(dao));
+    // Chaining
+
+    function test_KeptShareFeedsTheNextStage() public {
+        // Stage 0: swap, 5% fee, 95% kept by the DAO. Stage 1: pay the kept 95% to alice.
+        CapitalPipelinePlugin _plugin = _deployPlugin(
+            budget, _two(action, _deployRatio(fee, 50_000, address(dao), 950_000), NO_ACTION, _deployRatio(alice))
+        );
+        MockFiller _filler = new MockFiller(_plugin);
+        tokenB.mint(address(_filler), DEMAND);
+
+        _filler.fillWithoutData();
+
+        assertEq(tokenB.balanceOf(fee), 50 ether);
+        assertEq(tokenB.balanceOf(alice), 950 ether);
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B, "only the swap output moved, never the treasury's B");
+    }
+
+    function test_UnsplitOutputFeedsTheNextStage() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _two(action, NO_SPLITTER, NO_ACTION, _deployRatio(alice)));
+        MockFiller _filler = new MockFiller(_plugin);
+        tokenB.mint(address(_filler), DEMAND);
+
+        _filler.fillWithoutData();
+
+        assertEq(tokenB.balanceOf(alice), DEMAND);
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B);
+    }
+
+    function test_SkippedFirstStageLeavesTheBudgetUntouched() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.Skip), splitter));
+
+        _plugin.trigger(noData);
+
+        assertEq(budget.available(), RATE, "no checkpoint");
+    }
+
+    function test_SkippedLaterStageKeepsTheLeftoverInTheDao() public {
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(budget, _two(action, NO_SPLITTER, _bad(BadAction.Mode.Skip), _deployRatio(alice)));
+        MockFiller _filler = new MockFiller(_plugin);
+        tokenB.mint(address(_filler), DEMAND);
+
+        _filler.fillWithoutData();
+
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B + DEMAND);
+        assertEq(budget.available(), 0, "the budget is still committed: stage 0 spent it");
+    }
+
+    function test_BudgetCommitsOnceAfterTheLastStage() public {
+        // Both stages spend A: half to alice, then the kept half to bob
+        FundedStreamBudget _budget = _deployBudget(RATE, 0);
+        CapitalPipelinePlugin _plugin = _deployPlugin(
+            _budget, _two(NO_ACTION, _deployRatio(alice, 500_000, address(dao), 500_000), NO_ACTION, _deployRatio(bob))
+        );
+        vm.warp(block.timestamp + EPOCH);
+
+        _plugin.trigger(noData);
+
+        assertEq(tokenA.balanceOf(alice), RATE / 2);
+        assertEq(tokenA.balanceOf(bob), RATE / 2);
+        assertEq(_budget.lastSeenBalance(), DAO_A - RATE, "checkpoint sees the balance after both stages");
+    }
+
+    // Balance checks
+
+    function test_RevertWhen_ActionDeclaresOutputItNeverProduced() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.Lie), NO_SPLITTER));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CapitalPipelinePlugin.UnexpectedBalance.selector,
+                0,
+                address(dao),
+                address(tokenB),
+                DAO_B + 10 ether,
+                DAO_B
+            )
+        );
+        _plugin.trigger(noData);
+    }
+
+    function test_RevertWhen_ActionSpendsMoreThanItDeclared() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_bad(BadAction.Mode.Drain), NO_SPLITTER));
+
+        // Declared RATE / 2, actually moved RATE
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CapitalPipelinePlugin.UnexpectedBalance.selector,
+                0,
+                address(dao),
+                address(tokenA),
+                DAO_A - RATE / 2,
+                DAO_A - RATE
+            )
+        );
+        _plugin.trigger(noData);
+    }
+
+    // Helpers
+
+    function _bad(BadAction.Mode _mode) internal returns (IStageAction) {
+        return new BadAction(_mode, address(dao), tokenB);
     }
 
     function _clone() internal returns (CapitalPipelinePlugin) {

@@ -33,6 +33,7 @@ contract OpenFillActionTest is Fixture {
         assertEq(_plan.inAmount, 20 ether);
         assertEq(address(_plan.outToken), address(tokenB));
         assertEq(_plan.outAmount, DEMAND);
+        assertEq(_plan.beneficiary, alice, "carries the beneficiary on");
     }
 
     function test_BuildApprovesCallsBackAndClearsApproval() public view {
@@ -132,7 +133,8 @@ contract OpenFillActionTest is Fixture {
     }
 
     function _draft(uint256 _available) internal view returns (Plan memory) {
-        return Plan({inToken: tokenA, inAmount: _available, outToken: tokenA, outAmount: _available});
+        return
+            Plan({inToken: tokenA, inAmount: _available, outToken: tokenA, outAmount: _available, beneficiary: alice});
     }
 
     function _clone() internal returns (OpenFillAction) {

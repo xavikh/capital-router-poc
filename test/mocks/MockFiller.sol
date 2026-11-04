@@ -40,6 +40,11 @@ contract MockFiller is IFiller {
         plugin.trigger(_perStep);
     }
 
+    /// @notice Triggers with no data at all, which works for flows of any length
+    function fillWithoutData() external {
+        plugin.trigger(new bytes[](0));
+    }
+
     function fillOffer(
         IERC20 _offeredToken,
         uint256 _offeredAmount,

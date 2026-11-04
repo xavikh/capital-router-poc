@@ -76,7 +76,7 @@ contract PipelineInvariantTest is Fixture {
         super.setUp();
         FundedStreamBudget _budget = _deployBudget(RATE, 0);
         OpenFillAction _action = _deployAction(_budget);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(_budget, _action, _deploySplitter()));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _one(_action, _deploySplitter()));
 
         filler = new MockFiller(_plugin);
         tokenB.mint(address(filler), type(uint128).max);
