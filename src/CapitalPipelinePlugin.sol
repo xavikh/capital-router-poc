@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {IExecutor, Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {PluginCloneable} from "@aragon/osx-commons-contracts/src/plugin/PluginCloneable.sol";
@@ -17,27 +19,18 @@ import {TRIGGER_PERMISSION_ID, CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} f
 /// @dev Planning is view-only; every state change is a DAO action. What the plugin enforces for
 ///      every step, whatever its components do: all hooks run in order, the input never exceeds
 ///      the budget, allocations never exceed the output, and no action targets the DAO itself.
-contract CapitalPipelinePlugin is PluginCloneable {
+contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, ReentrancyGuardUpgradeable {
     Step[] internal _steps;
-
-    /// @notice When true, `trigger` reverts
-    bool public paused;
 
     /// @dev Makes every execution ID unique
     uint256 internal _nonce;
 
-    /// @dev Reentrancy lock. Transient, so it needs no initialization on clones.
-    bool internal transient _entered;
-
     event StepsUpdated(Step[] steps);
-    event PausedSet(bool paused);
     event StepExecuted(uint256 indexed stepIndex, address indexed caller, bytes32 executionId, Plan plan);
 
     error NoSteps();
     error NoBudget(uint256 stepIndex);
     error BudgetMismatch(uint256 stepIndex);
-    error Paused();
-    error Reentrant();
     error DataLengthMismatch(uint256 expected, uint256 actual);
     error InAmountExceedsBudget(uint256 stepIndex, uint256 inAmount, uint256 available);
     error AllocationExceedsOutput(uint256 stepIndex, uint256 allocated, uint256 outAmount);
@@ -46,16 +39,14 @@ contract CapitalPipelinePlugin is PluginCloneable {
 
     function initialize(IDAO _dao, Step[] calldata _newSteps) external initializer {
         __PluginCloneable_init(_dao);
+        __Pausable_init();
+        __ReentrancyGuard_init();
         _setSteps(_newSteps);
     }
 
     /// @notice Runs every step in order
     /// @param _data Empty, or one entry per step (passed to that step's action)
-    function trigger(bytes[] calldata _data) external auth(TRIGGER_PERMISSION_ID) {
-        if (_entered) revert Reentrant();
-        _entered = true;
-        if (paused) revert Paused();
-
+    function trigger(bytes[] calldata _data) external nonReentrant whenNotPaused auth(TRIGGER_PERMISSION_ID) {
         uint256 _len = _steps.length;
         if (_data.length != 0 && _data.length != _len) revert DataLengthMismatch(_len, _data.length);
 
@@ -63,7 +54,6 @@ contract CapitalPipelinePlugin is PluginCloneable {
         for (uint256 i; i < _len; ++i) {
             _runStep(i, _data.length == 0 ? msg.data[0:0] : _data[i], _callNonce);
         }
-        _entered = false;
     }
 
     /// @notice Replaces all steps. DAO only: a step can return arbitrary DAO actions.
@@ -71,10 +61,14 @@ contract CapitalPipelinePlugin is PluginCloneable {
         _setSteps(_newSteps);
     }
 
-    /// @notice Pauses or unpauses every step
-    function setPaused(bool _paused) external auth(MANAGER_PERMISSION_ID) {
-        paused = _paused;
-        emit PausedSet(_paused);
+    /// @notice Stops every step until `unpause`
+    function pause() external auth(MANAGER_PERMISSION_ID) {
+        _pause();
+    }
+
+    /// @notice Resumes every step
+    function unpause() external auth(MANAGER_PERMISSION_ID) {
+        _unpause();
     }
 
     function steps() external view returns (Step[] memory) {

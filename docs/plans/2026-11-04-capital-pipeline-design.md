@@ -79,7 +79,7 @@ interface ISplitter {
 
 ```
 trigger(bytes[] data)                                    // one entry per step, or empty
-  if paused → revert Paused()
+  nonReentrant, whenNotPaused                            // OpenZeppelin modifiers
   for each step i:
     draft = { A, budget.available(), A, budget.available() }
     action.preconditions(caller, draft)                 // skipped when there is no action
@@ -119,12 +119,12 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 ## Components (v1)
 
-### `CapitalPipelinePlugin` (PluginCloneable)
+### `CapitalPipelinePlugin` (PluginCloneable, PausableUpgradeable, ReentrancyGuardUpgradeable)
 
-- Storage: `Step[] steps` where `Step = { IBudget budget; IStepAction action; ISplitter splitter; }`, plus one `bool paused` for the whole plugin.
-- `trigger(bytes[] data)`: `auth(TRIGGER_PERMISSION_ID)` (granted to `ANY_ADDR` at install, so OSx conditions can gate it later), plugin-level reentrancy guard.
+- Storage: `Step[] steps` where `Step = { IBudget budget; IStepAction action; ISplitter splitter; }`. Pause state and reentrancy lock come from OpenZeppelin.
+- `trigger(bytes[] data)`: `auth(TRIGGER_PERMISSION_ID)` (granted to `ANY_ADDR` at install, so OSx conditions can gate it later), `nonReentrant`, `whenNotPaused`.
 - `setSteps(Step[])`: `auth(CONFIGURE_PERMISSION_ID)`, held by the DAO only. An action can return arbitrary DAO actions, so installing a step is equivalent to executing from the treasury and stays a governance decision.
-- `setPaused(bool)`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, the DAO removes it with `setSteps`.
+- `pause()`, `unpause()`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, the DAO removes it with `setSteps`.
 - Every assembled action targeting the DAO itself is rejected, so no step can grant permissions, upgrade, or reconfigure the DAO.
 - `setSteps` rejects a step whose swap action is bound to a different budget than the step's budget.
 
@@ -170,7 +170,7 @@ Deploys the plugin and components as clones and grants:
 ## Failure handling
 
 - Any revert in any component or hook reverts the whole `trigger`. No failsafe map in v1 (one step); add it when multi-step flows exist.
-- Paused plugin: `trigger` reverts with `Paused()`.
+- Paused plugin: `trigger` reverts with `Pausable: paused`.
 - Empty pot (`plan.inAmount == 0`): the step is skipped without a checkpoint; `trigger` succeeds.
 - `data` must be empty or have one entry per step, otherwise revert.
 - An assembled action targeting the DAO: `trigger` reverts with `ActionTargetsDao(step, index)`.
@@ -209,4 +209,4 @@ Details settled while implementing v1:
 - `ICheckpointedBudget` extends `IBudget` with `writeCheckpoint()`. `OpenFillAction` requires one, so its price setters can restart the auction.
 - `IFiller.fillOffer` keeps the selector of capital-router's `ISwapSolver.fillOffer`, so existing fillers work unchanged.
 - `FundedStreamBudget` drops ERC165, `budgetId` and the `vault` parameter (the vault is `dao()`). Tokens must have code, which also rejects native ETH.
-- The reentrancy lock on `trigger` uses a transient storage variable, so clones need no initialization.
+- Pause and the reentrancy lock on `trigger` use OpenZeppelin's `PausableUpgradeable` and `ReentrancyGuardUpgradeable` (4.9.6, the version OSx depends on). OZ's transient `ReentrancyGuardTransient` needs OZ 5.1+, so the lock costs about 1.8k more gas per trigger than a transient one would.

@@ -23,7 +23,7 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 |---|---|---|
 | `TRIGGER_PERMISSION_ID` | anyone | `trigger()` |
 | `CONFIGURE_PERMISSION_ID` | DAO only | `setSteps()` |
-| `MANAGER_PERMISSION_ID` | manager | parameter setters, `setPaused()` |
+| `MANAGER_PERMISSION_ID` | manager | parameter setters, `pause()`, `unpause()` |
 | `CHECKPOINT_PERMISSION_ID` | DAO, swap action | restarting the budget |
 
 ## Develop

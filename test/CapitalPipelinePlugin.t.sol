@@ -12,7 +12,7 @@ import {IBudget} from "../src/interfaces/IBudget.sol";
 import {IStepAction} from "../src/interfaces/IStepAction.sol";
 import {ISplitter} from "../src/interfaces/ISplitter.sol";
 import {Step} from "../src/lib/types.sol";
-import {CONFIGURE_PERMISSION_ID} from "../src/lib/constants.sol";
+import {CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
 import {BadAction, OverAllocatingSplitter} from "./mocks/BadComponents.sol";
@@ -55,11 +55,23 @@ contract CapitalPipelinePluginTest is Fixture {
         assertEq(address(plugin.steps()[0].action), address(0));
     }
 
-    function test_ManagerPauses() public {
+    function test_ManagerPausesAndUnpauses() public {
         vm.prank(manager);
-        plugin.setPaused(true);
-
+        plugin.pause();
         assertTrue(plugin.paused());
+
+        vm.prank(manager);
+        plugin.unpause();
+        assertFalse(plugin.paused());
+    }
+
+    function test_RevertWhen_PauseUnauthorized() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DaoUnauthorized.selector, address(dao), address(plugin), address(this), MANAGER_PERMISSION_ID
+            )
+        );
+        plugin.pause();
     }
 
     function test_RevertWhen_ManagerSetsSteps() public {
@@ -147,9 +159,9 @@ contract CapitalPipelinePluginTest is Fixture {
 
     function test_RevertWhen_Paused() public {
         vm.prank(manager);
-        plugin.setPaused(true);
+        plugin.pause();
 
-        vm.expectRevert(CapitalPipelinePlugin.Paused.selector);
+        vm.expectRevert("Pausable: paused");
         filler.fill("");
     }
 
@@ -189,7 +201,7 @@ contract CapitalPipelinePluginTest is Fixture {
 
         filler.fill("");
 
-        assertEq(filler.reentryError(), abi.encodeWithSelector(CapitalPipelinePlugin.Reentrant.selector));
+        assertEq(filler.reentryError(), abi.encodeWithSignature("Error(string)", "ReentrancyGuard: reentrant call"));
         assertEq(tokenB.balanceOf(BURN), 950 ether, "the outer fill still completes");
     }
 
