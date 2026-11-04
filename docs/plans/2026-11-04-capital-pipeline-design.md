@@ -6,7 +6,7 @@ Reference implementation: `../capital-router`
 
 ## Goal
 
-A successor to capital-router where every strategy ("step") has the same five slots, so steps are easy to compose and reason about, and where managers can tune parameters after install.
+A successor to capital-router where every strategy ("step") has the same structure (budget → action → splitter, with every action exposing preconditions and postconditions), so steps are easy to compose and reason about, and where managers can tune parameters after install.
 
 v1 target flow: an OpenFill-style swap (a filler buys token A from the DAO for token B), then split the B received by ratio: most of it to a burn address, a small part to a fee address.
 
@@ -25,17 +25,20 @@ v1 target flow: an OpenFill-style swap (a filler buys token A from the DAO for t
 
 ### Step pipeline
 
-Each step runs five slots in this order. Every slot except the budget may be empty (`address(0)`).
+A step has three components. Action and splitter may be empty (`address(0)`); the budget may not.
 
 ```
-Budget → Precondition → Action → Postcondition → Splitter
- (in)      (gate)      (convert)  (extra checks)   (deliver out)
+Budget  →  Action                                      →  Splitter
+ (in)      preconditions → build → postconditions         (deliver out)
 ```
 
 - **Budget**: how much of token A the step may spend now.
-- **Precondition**: reverts if the step must not run.
-- **Action**: converts input into output. With no action, output = input (a plain transfer step).
-- **Postcondition**: extra step-level checks, appended as DAO actions.
+- **Action**: converts input into output. Its interface has three hooks, all called by the plugin:
+  - `preconditions`: reverts if the action must not run.
+  - `build`: the actions that do the work.
+  - `postconditions`: the checks that make the work safe, appended as DAO actions.
+
+  With no action, output = input (a plain transfer step) and there are no hooks to call.
 - **Splitter**: who receives the output. With no splitter, the output stays in the DAO.
 
 The splitter runs on the **output**. This is valid because an action must declare its output amount at plan time (see rules). It also means the DAO only forwards exactly what the step produced, never its existing holdings of the output token.
@@ -52,24 +55,16 @@ interface IBudget {
     function commitActions(Plan calldata plan) external view returns (Action[] memory);
 }
 
-interface IPrecondition {
-    function check(address caller, Plan calldata draft) external view; // revert = blocked
-}
-
 interface IStepAction {
-    /// The checks this action needs before running. Always called by the plugin. Revert = blocked.
+    /// Reverts if the action must not run
     function preconditions(address caller, Plan calldata draft) external view;
 
     /// Caps inAmount, sets outToken/outAmount, returns the actions that do the work
     function build(address caller, bytes calldata data, Plan calldata draft)
         external view returns (Plan memory plan, Action[] memory actions);
 
-    /// The checks that make this action safe. Always called by the plugin, so they can't be left out.
+    /// The checks that make this action safe, executed by the DAO after the work
     function postconditions(address caller, Plan calldata plan) external view returns (Action[] memory);
-}
-
-interface IPostcondition {
-    function actions(address caller, Plan calldata plan) external view returns (Action[] memory);
 }
 
 interface ISplitter {
@@ -84,12 +79,10 @@ trigger(bytes[] data)                                    // one entry per step, 
   if paused → revert Paused()
   for each step i:
     draft = { A, budget.available(), A, budget.available() }
-    action.preconditions(caller, draft)                 // always called when an action is set
-    pre.check(caller, draft)                            // optional, step-level extras
+    action.preconditions(caller, draft)                 // skipped when there is no action
     (plan, acts) = action.build(caller, data[i], draft)  // no action → (draft, [])
     if plan.inAmount == 0 → skip step (no checkpoint)
-    acts += action.postconditions(caller, plan)         // always called when an action is set
-    acts += post.actions(caller, plan)                  // optional, step-level extras
+    acts += action.postconditions(caller, plan)         // skipped when there is no action
     acts += transfers(plan.outToken, splitter.split(plan.outAmount))
     acts += budget.commitActions(plan)
     dao.execute(executionId(i), acts, 0)
@@ -114,7 +107,7 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 ## Rules
 
-1. **An action implements its own preconditions and postconditions.** OpenFill's "DAO received ≥ out" lives in `OpenFillAction.postconditions`, and the plugin calls both hooks on every step with an action. If the check were a separate address in the step's postcondition slot, a step installed with that slot empty would hand the budget to the filler for nothing. The step-level precondition and postcondition slots are only for extra checks on top. Budget and splitter stay separate from the action.
+1. **Preconditions and postconditions are part of the action interface, not of the step.** OpenFill's "DAO received ≥ out" lives in `OpenFillAction.postconditions`, and the plugin calls both hooks on every step with an action, so the check can't be left out by wiring. Budget and splitter stay separate components of the step.
 2. **The budget always appends its own commit.** Steps can't leave it out. Without `writeCheckpoint`, a filler could fill again in the same block.
 3. **Planning is view-only.** Every state change is a DAO action inside the single `execute`. No `PREPARE_PERMISSION_ID`, no self-call wrapper. Previews are a plain `eth_call`.
 4. **Actions declare their output at plan time.** OpenFill: the demand. No action: output = input. Actions whose output is only known after execution (CowSwap) cannot be combined with a splitter.
@@ -124,7 +117,7 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 ### `CapitalPipelinePlugin` (PluginCloneable)
 
-- Storage: `Step[] steps` where `Step = { IBudget budget; IPrecondition pre; IStepAction action; IPostcondition post; ISplitter splitter; }`, plus one `bool paused` for the whole plugin.
+- Storage: `Step[] steps` where `Step = { IBudget budget; IStepAction action; ISplitter splitter; }`, plus one `bool paused` for the whole plugin.
 - `trigger(bytes[] data)`: `auth(TRIGGER_PERMISSION_ID)` (granted to `ANY_ADDR` at install, so OSx conditions can gate it later), plugin-level reentrancy guard.
 - `setSteps(Step[])`, `setPaused(bool)`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, remove it with `setSteps`.
 - `setSteps` rejects a step whose swap action is bound to a different budget than the step's budget.
@@ -169,7 +162,7 @@ Deploys the plugin and components as clones and grants:
 
 ## Failure handling
 
-- Any revert in any slot reverts the whole `trigger`. No failsafe map in v1 (one step); add it when multi-step flows exist.
+- Any revert in any component or hook reverts the whole `trigger`. No failsafe map in v1 (one step); add it when multi-step flows exist.
 - Paused plugin: `trigger` reverts with `Paused()`.
 - Empty pot (`plan.inAmount == 0`): the step is skipped without a checkpoint; `trigger` succeeds.
 - `data` must be empty or have one entry per step, otherwise revert.
@@ -196,7 +189,6 @@ Deploys the plugin and components as clones and grants:
 
 - Claim kind (cumulative release + shares + ledger) for per-recipient claims.
 - Failsafe map for multi-step plugins.
-- Precondition implementations.
 - Uniswap action (split the guaranteed minimum; surplus stays in the DAO). CowSwap is incompatible with a splitter.
 - Native ETH on either side.
 - Oracle-based pricing.
