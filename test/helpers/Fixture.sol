@@ -2,11 +2,14 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
+import {BalanceBudget} from "../../src/budgets/BalanceBudget.sol";
 import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
 import {OpenFillAction} from "../../src/actions/OpenFillAction.sol";
+import {MerkleClaimAction} from "../../src/actions/MerkleClaimAction.sol";
 import {CapitalPipelinePlugin} from "../../src/CapitalPipelinePlugin.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
 import {IStageAction} from "../../src/interfaces/IStageAction.sol";
@@ -75,6 +78,14 @@ abstract contract Fixture is Test {
         dao.grant(address(_budget), address(dao), CHECKPOINT_PERMISSION_ID);
     }
 
+    function _deployBalanceBudget(IERC20 _token) internal returns (BalanceBudget _budget) {
+        _budget = BalanceBudget(
+            ProxyLib.deployMinimalProxy(
+                address(new BalanceBudget()), abi.encodeCall(BalanceBudget.initialize, (dao, _token))
+            )
+        );
+    }
+
     // Splitters
 
     /// @dev 95% to the burn address, 5% to the fee address
@@ -123,6 +134,15 @@ abstract contract Fixture is Test {
         );
         dao.grant(address(_action), manager, MANAGER_PERMISSION_ID);
         dao.grant(address(_budget), address(_action), CHECKPOINT_PERMISSION_ID);
+    }
+
+    function _deployMerkle(IBudget _budget, bytes32 _root) internal returns (MerkleClaimAction _merkle) {
+        _merkle = MerkleClaimAction(
+            ProxyLib.deployMinimalProxy(
+                address(new MerkleClaimAction()), abi.encodeCall(MerkleClaimAction.initialize, (dao, _budget, _root))
+            )
+        );
+        dao.grant(address(_merkle), manager, MANAGER_PERMISSION_ID);
     }
 
     // Plugin

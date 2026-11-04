@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth/auth.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
+import {BalanceBudget} from "../src/budgets/BalanceBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
+import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
 import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
 import {IBudget} from "../src/interfaces/IBudget.sol";
 import {IStageAction} from "../src/interfaces/IStageAction.sol";
@@ -14,7 +17,12 @@ import {Stage} from "../src/lib/types.sol";
 import {CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
-import {BadAction, OverAllocatingSplitter} from "./mocks/BadComponents.sol";
+import {
+    BadAction,
+    OverAllocatingSplitter,
+    DuplicateRecipientSplitter,
+    FalseReturnToken
+} from "./mocks/BadComponents.sol";
 
 contract CapitalPipelinePluginTest is Fixture {
     FundedStreamBudget internal budget;
@@ -286,6 +294,19 @@ contract CapitalPipelinePluginTest is Fixture {
         assertEq(_budget.lastSeenBalance(), DAO_A - RATE, "checkpoint sees the balance after both stages");
     }
 
+    function test_RevertWhen_ALaterStageChangesTheBeneficiary() public {
+        BalanceBudget _budget = _deployBalanceBudget(tokenA);
+        MerkleClaimAction _merkle = _deployMerkle(_budget, _singleLeafRoot(alice, 1 ether));
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(_budget, _two(_merkle, NO_SPLITTER, _bad(BadAction.Mode.Redirect), _deployRatio(alice)));
+
+        bytes[] memory _data = new bytes[](2);
+        _data[0] = abi.encode(alice, 1 ether, new bytes32[](0), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.BeneficiaryChanged.selector, 1));
+        _plugin.trigger(_data);
+    }
+
     // Balance checks
 
     function test_RevertWhen_ActionDeclaresOutputItNeverProduced() public {
@@ -321,6 +342,37 @@ contract CapitalPipelinePluginTest is Fixture {
         _plugin.trigger(noData);
     }
 
+    function test_RevertWhen_ATransferSilentlyFails() public {
+        FalseReturnToken _token = new FalseReturnToken(0);
+        _token.mint(address(dao), 100 ether);
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(_deployBalanceBudget(IERC20(address(_token))), _one(NO_ACTION, _deployRatio(alice)));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CapitalPipelinePlugin.UnexpectedBalance.selector, 0, alice, address(_token), 100 ether, 0
+            )
+        );
+        _plugin.trigger(noData);
+    }
+
+    /// capital-router checks each transfer against a snapshot taken before any of them, so a
+    /// recipient listed twice can miss a silent failure. Here expectations add up per recipient.
+    function test_RevertWhen_ARepeatedRecipientMissesATransfer() public {
+        FalseReturnToken _token = new FalseReturnToken(1); // the second transfer silently fails
+        _token.mint(address(dao), 100 ether);
+        CapitalPipelinePlugin _plugin = _deployPlugin(
+            _deployBalanceBudget(IERC20(address(_token))), _one(NO_ACTION, new DuplicateRecipientSplitter(alice))
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CapitalPipelinePlugin.UnexpectedBalance.selector, 0, alice, address(_token), 100 ether, 50 ether
+            )
+        );
+        _plugin.trigger(noData);
+    }
+
     // Helpers
 
     function _bad(BadAction.Mode _mode) internal returns (IStageAction) {
@@ -329,5 +381,10 @@ contract CapitalPipelinePluginTest is Fixture {
 
     function _clone() internal returns (CapitalPipelinePlugin) {
         return CapitalPipelinePlugin(ProxyLib.deployMinimalProxy(address(new CapitalPipelinePlugin()), ""));
+    }
+
+    /// @dev A one-leaf tree: the root is the leaf itself and the proof is empty
+    function _singleLeafRoot(address _account, uint256 _cumulative) internal pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(_account, _cumulative))));
     }
 }
