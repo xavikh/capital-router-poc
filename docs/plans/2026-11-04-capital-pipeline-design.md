@@ -56,6 +56,9 @@ interface IBudget {
 }
 
 interface IStepAction {
+    /// The budget this action is bound to, or address(0) if it works with any budget
+    function budget() external view returns (IBudget);
+
     /// Reverts if the action must not run
     function preconditions(address caller, Plan calldata draft) external view;
 
@@ -197,3 +200,13 @@ Deploys the plugin and components as clones and grants:
 - Uniswap action (split the guaranteed minimum; surplus stays in the DAO). CowSwap is incompatible with a splitter.
 - Native ETH on either side.
 - Oracle-based pricing.
+
+## Implementation notes
+
+Details settled while implementing v1:
+
+- `IStepAction.budget()` returns the budget an action is bound to (address(0) if any). `setSteps` uses it to reject a step whose action is bound to a different budget.
+- `ICheckpointedBudget` extends `IBudget` with `writeCheckpoint()`. `OpenFillAction` requires one, so its price setters can restart the auction.
+- `IFiller.fillOffer` keeps the selector of capital-router's `ISwapSolver.fillOffer`, so existing fillers work unchanged.
+- `FundedStreamBudget` drops ERC165, `budgetId` and the `vault` parameter (the vault is `dao()`). Tokens must have code, which also rejects native ETH.
+- The reentrancy lock on `trigger` uses a transient storage variable, so clones need no initialization.
