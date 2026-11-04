@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth/auth.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
@@ -13,12 +14,15 @@ import {ISplitter} from "../src/interfaces/ISplitter.sol";
 import {Step} from "../src/lib/types.sol";
 import {CONFIGURE_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
+import {MockFiller} from "./mocks/MockFiller.sol";
+import {BadAction, OverAllocatingSplitter} from "./mocks/BadComponents.sol";
 
 contract CapitalPipelinePluginTest is Fixture {
     FundedStreamBudget internal budget;
     OpenFillAction internal action;
     RatioSplitter internal splitter;
     CapitalPipelinePlugin internal plugin;
+    MockFiller internal filler;
 
     function setUp() public override {
         super.setUp();
@@ -26,6 +30,11 @@ contract CapitalPipelinePluginTest is Fixture {
         action = _deployAction(budget);
         splitter = _deploySplitter();
         plugin = _deployPlugin(_steps(budget, action, splitter));
+
+        filler = new MockFiller(plugin);
+        tokenB.mint(address(filler), 1_000_000 ether);
+
+        vm.warp(block.timestamp + EPOCH); // 10 A on offer
     }
 
     // Configuration
@@ -83,6 +92,91 @@ contract CapitalPipelinePluginTest is Fixture {
         vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 0));
         vm.prank(address(dao));
         plugin.setSteps(_steps(_other, action, splitter));
+    }
+
+    // Trigger
+
+    function test_FillSwapsAndSplitsTheProceeds() public {
+        filler.fill("");
+
+        assertEq(tokenA.balanceOf(address(dao)), DAO_A - RATE, "DAO hands over the offer");
+        assertEq(tokenA.balanceOf(address(filler)), RATE, "filler receives the offer");
+        assertEq(tokenA.allowance(address(dao), address(filler)), 0, "no approval survives");
+        assertEq(tokenB.balanceOf(BURN), 950 ether, "95% burned");
+        assertEq(tokenB.balanceOf(fee), 50 ether, "5% fee");
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B, "pre-existing B untouched");
+        assertEq(budget.available(), 0, "auction restarts");
+    }
+
+    function test_SecondFillInTheSameBlockGetsNothing() public {
+        filler.fill("");
+        filler.fill("");
+
+        assertEq(tokenA.balanceOf(address(filler)), RATE);
+        assertEq(tokenB.balanceOf(BURN), 950 ether);
+    }
+
+    function test_RevertWhen_FillerUnderDelivers() public {
+        filler.setFillDelta(-1);
+
+        // Action 3 is the postcondition: assertReceived
+        vm.expectRevert(abi.encodeWithSelector(DAO.ActionFailed.selector, 3));
+        filler.fill("");
+
+        assertEq(budget.available(), RATE, "offer not consumed");
+    }
+
+    function test_StepWithoutActionTransfersTheBudget() public {
+        FundedStreamBudget _budget = _deployBudget(RATE, 0);
+        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(_budget, IStepAction(address(0)), splitter));
+        vm.warp(block.timestamp + EPOCH);
+
+        _plugin.trigger(new bytes[](0));
+
+        assertEq(tokenA.balanceOf(BURN), 9.5 ether);
+        assertEq(tokenA.balanceOf(fee), 0.5 ether);
+        assertEq(_budget.available(), 0);
+    }
+
+    function test_PreconditionsCanBlockAStep() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.Block), splitter));
+
+        vm.expectRevert(BadAction.Blocked.selector);
+        _plugin.trigger(new bytes[](0));
+    }
+
+    function test_RevertWhen_Paused() public {
+        vm.prank(manager);
+        plugin.setPaused(true);
+
+        vm.expectRevert(CapitalPipelinePlugin.Paused.selector);
+        filler.fill("");
+    }
+
+    function test_RevertWhen_DataLengthMismatch() public {
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.DataLengthMismatch.selector, 1, 2));
+        plugin.trigger(new bytes[](2));
+    }
+
+    function test_RevertWhen_ActionSpendsMoreThanTheBudget() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.Overspend), splitter));
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.InAmountExceedsBudget.selector, 0, RATE + 1, RATE));
+        _plugin.trigger(new bytes[](0));
+    }
+
+    function test_RevertWhen_AllocationsExceedTheOutput() public {
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(_steps(budget, IStepAction(address(0)), new OverAllocatingSplitter()));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(CapitalPipelinePlugin.AllocationExceedsOutput.selector, 0, RATE + 1, RATE)
+        );
+        _plugin.trigger(new bytes[](0));
+    }
+
+    function _bad(BadAction.Mode _mode) internal returns (IStepAction) {
+        return new BadAction(_mode, address(dao));
     }
 
     function _clone() internal returns (CapitalPipelinePlugin) {
