@@ -6,6 +6,7 @@ import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
 import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
+import {OpenFillAction} from "../../src/actions/OpenFillAction.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../../src/lib/constants.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
@@ -69,5 +70,17 @@ abstract contract Fixture is Test {
             )
         );
         dao.grant(address(_splitter), manager, MANAGER_PERMISSION_ID);
+    }
+
+    /// @dev Bound to `_budget`, which it may restart when its price terms change
+    function _deployAction(FundedStreamBudget _budget) internal returns (OpenFillAction _action) {
+        _action = OpenFillAction(
+            ProxyLib.deployMinimalProxy(
+                address(new OpenFillAction()),
+                abi.encodeCall(OpenFillAction.initialize, (dao, _budget, tokenB, DEMAND, MIN_PRICE))
+            )
+        );
+        dao.grant(address(_action), manager, MANAGER_PERMISSION_ID);
+        dao.grant(address(_budget), address(_action), CHECKPOINT_PERMISSION_ID);
     }
 }
