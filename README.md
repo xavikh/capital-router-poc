@@ -1,17 +1,21 @@
 # Capital Pipeline
 
-Aragon OSx plugin that runs one treasury flow per install: a **budget**, then a chain of
-**stages** (action → splitter), where each stage passes what it produced and didn't transfer out
-to the next one. After every stage the plugin checks balances, so a stage can only ever spend what
-the budget released or what the previous stage really produced.
+Aragon OSx plugin that runs one treasury flow per install: a **budget** feeding a **tree of
+actions**. Every node passes its output to its children, split by fixed weights when there are
+several, and every branch ends in a leaf that consumes what it receives (transfer, burn, keep).
+Each node runs in its own `dao.execute`, followed by balance checks, so a node can only ever spend
+what the budget released or what its parent really produced.
 
 ```
-budget → [action → splitter] → [action → splitter] → … → budget commit
+budget  FundedStreamBudget(A)
+└─ OpenFill (A → B)
+   ├─ 95% → Burn
+   └─  5% → Transfer(feeAddr)
 ```
 
-Examples: sell token A in a Dutch auction and split the proceeds 95% burn / 5% fee; swap, keep
-part of the output and pay it on; let accounts claim cumulative Merkle allocations, optionally
-swapped before they're paid. Any ERC20 works, and native ETH as `address(0)`.
+Examples: sell token A in a Dutch auction and burn 95% of the proceeds, paying 5% as a fee; let
+accounts claim cumulative Merkle allocations, optionally swapped before they're paid; pay a
+payroll from a stream. Any ERC20 works, and native ETH as `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`.
 
 Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-04-capital-pipeline-design.md)
 
@@ -19,13 +23,17 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 
 | Path | What |
 |---|---|
-| `src/CapitalPipelinePlugin.sol` | Runs the flow, checks balances after every stage |
+| `src/CapitalPipelinePlugin.sol` | Runs the tree, checks balances after every node |
 | `src/budgets/FundedStreamBudget.sol` | Streaming pot that never jumps |
 | `src/budgets/BalanceBudget.sol` | The DAO's whole balance of a token |
-| `src/actions/OpenFillAction.sol` | Open-fill swap with Dutch-auction pricing |
-| `src/actions/MerkleClaimAction.sol` | Cumulative Merkle claims with a redirectable beneficiary |
-| `src/splitters/RatioSplitter.sol` | Fixed-ratio split; a share to the DAO carries to the next stage |
-| `src/splitters/PayBeneficiary.sol` | Pays a stage's output to the flow's beneficiary |
+| `src/actions/OpenFillAction.sol` | Open-fill swap with Dutch-auction pricing (root only) |
+| `src/actions/MerkleClaimAction.sol` | Cumulative Merkle claims with a redirectable beneficiary (root only) |
+| `src/actions/TransferAction.sol` | Leaf: sends its input to a fixed recipient |
+| `src/actions/TransferToBeneficiaryAction.sol` | Leaf: sends its input to the flow's beneficiary |
+| `src/actions/SplitTransferAction.sol` | Leaf: pays a dynamic list of recipients from a splitter |
+| `src/actions/BurnAction.sol` | Leaf: burns its input |
+| `src/actions/KeepAction.sol` | Leaf: leaves its input in the DAO |
+| `src/splitters/RatioSplitter.sol` | Fixed-ratio recipient list for `SplitTransferAction` |
 | `src/setup/CapitalPipelinePluginSetup.sol` | Installs the swap-and-split flow |
 
 ## Permissions
@@ -36,6 +44,7 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `CONFIGURE_PERMISSION_ID` | DAO only | `setFlow()` |
 | `MANAGER_PERMISSION_ID` | manager | parameter setters, Merkle `setRoot()`, `pause()`, `unpause()` |
 | `CHECKPOINT_PERMISSION_ID` | DAO, swap action | restarting the stream budget |
+| `RECORD_CLAIM_PERMISSION_ID` | DAO | Merkle `recordClaim()`, run by the plugin through the DAO |
 
 ## Develop
 
