@@ -11,7 +11,7 @@ budget → [action → splitter] → [action → splitter] → … → budget co
 
 Examples: sell token A in a Dutch auction and split the proceeds 95% burn / 5% fee; swap, keep
 part of the output and pay it on; let accounts claim cumulative Merkle allocations, optionally
-swapped before they're paid.
+swapped before they're paid. Any ERC20 works, and native ETH as `address(0)`.
 
 Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-04-capital-pipeline-design.md)
 

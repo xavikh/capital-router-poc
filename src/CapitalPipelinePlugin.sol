@@ -11,6 +11,7 @@ import {IBudget} from "./interfaces/IBudget.sol";
 import {ISplitter} from "./interfaces/ISplitter.sol";
 import {Plan, Allocation, Stage} from "./lib/types.sol";
 import {TRIGGER_PERMISSION_ID, CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "./lib/constants.sol";
+import {tokenBalance, transferAction, isToken} from "./lib/tokens.sol";
 
 /// @title CapitalPipelinePlugin
 /// @notice Runs one flow: the budget is read once, then each stage runs its action
@@ -150,7 +151,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
             _checks = _stage.action.postconditions(msg.sender, _plan);
         }
         if (_plan.inAmount > _draft.inAmount) revert InAmountExceedsInput(_index, _plan.inAmount, _draft.inAmount);
-        if (_plan.outAmount != 0 && address(_plan.outToken).code.length == 0) revert InvalidOutToken(_index);
+        if (_plan.outAmount != 0 && !isToken(_plan.outToken)) revert InvalidOutToken(_index);
 
         _transfers = _split(_index, _stage.splitter, _plan);
         _actions = _concat(_work, _checks, _transferActions(_plan.outToken, _transfers));
@@ -206,8 +207,10 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     /// @dev Records the DAO's in/out balances and, per unique recipient, the balance it must reach
     function _snapshot(Plan memory _plan, Allocation[] memory _transfers) internal view returns (Snapshot memory _s) {
         address _dao = address(dao());
-        _s.inBalance = _plan.inToken.balanceOf(_dao);
-        if (_plan.outToken != _plan.inToken && _plan.outAmount != 0) _s.outBalance = _plan.outToken.balanceOf(_dao);
+        _s.inBalance = tokenBalance(_plan.inToken, _dao);
+        if (_plan.outToken != _plan.inToken && _plan.outAmount != 0) {
+            _s.outBalance = tokenBalance(_plan.outToken, _dao);
+        }
 
         _s.recipients = new address[](_transfers.length);
         _s.expected = new uint256[](_transfers.length);
@@ -218,7 +221,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
             while (k < _s.recipientCount && _s.recipients[k] != _transfers[i].recipient) ++k;
             if (k == _s.recipientCount) {
                 _s.recipients[k] = _transfers[i].recipient;
-                _s.expected[k] = _plan.outToken.balanceOf(_transfers[i].recipient);
+                _s.expected[k] = tokenBalance(_plan.outToken, _transfers[i].recipient);
                 ++_s.recipientCount;
             }
             _s.expected[k] += _transfers[i].amount;
@@ -227,7 +230,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     function _verify(uint256 _index, Plan memory _plan, Snapshot memory _s) internal view {
         for (uint256 k; k < _s.recipientCount; ++k) {
-            uint256 _actual = _plan.outToken.balanceOf(_s.recipients[k]);
+            uint256 _actual = tokenBalance(_plan.outToken, _s.recipients[k]);
             if (_actual < _s.expected[k]) {
                 revert UnexpectedBalance(_index, _s.recipients[k], address(_plan.outToken), _s.expected[k], _actual);
             }
@@ -247,7 +250,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     /// @dev Reverts unless `balance + spent >= target`
     function _checkDao(uint256 _index, IERC20 _token, uint256 _target, uint256 _spent) internal view {
         address _dao = address(dao());
-        uint256 _actual = _token.balanceOf(_dao);
+        uint256 _actual = tokenBalance(_token, _dao);
         if (_actual + _spent < _target) {
             revert UnexpectedBalance(_index, _dao, address(_token), _target > _spent ? _target - _spent : 0, _actual);
         }
@@ -269,11 +272,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     {
         _actions = new Action[](_transfers.length);
         for (uint256 i; i < _transfers.length; ++i) {
-            _actions[i] = Action({
-                to: address(_token),
-                value: 0,
-                data: abi.encodeCall(IERC20.transfer, (_transfers[i].recipient, _transfers[i].amount))
-            });
+            _actions[i] = transferAction(_token, _transfers[i].recipient, _transfers[i].amount);
         }
     }
 

@@ -12,6 +12,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {ICheckpointedBudget} from "../interfaces/IBudget.sol";
 import {Plan} from "../lib/types.sol";
+import {tokenBalance, isToken} from "../lib/tokens.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.sol";
 
 /// @title FundedStreamBudget
@@ -94,7 +95,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     /// @param lastSeenBalance The DAO balance seen by the sync
     event Synced(uint256 baseAmount, uint256 lastSeenBalance);
 
-    /// @notice Thrown when the token has no code (includes native ETH, unsupported in v1)
+    /// @notice Thrown when the token is neither native ETH (address(0)) nor a contract
     error InvalidToken();
 
     /// @notice Thrown when the given epoch interval is zero
@@ -109,7 +110,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     /// @dev A DAO that holds no tokens at initialization keeps the amount at zero until `sync()`
     ///      is called after it is funded.
     /// @param _dao The DAO holding the funds
-    /// @param _token The token streamed (ERC20 only)
+    /// @param _token The token streamed (address(0) for native ETH)
     /// @param _amountPerEpoch How much the available amount grows per epoch
     /// @param _maxBudget Maximum available amount at any point in time (0 for no cap)
     /// @param _epochInterval The epoch duration in seconds
@@ -117,7 +118,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
         external
         initializer
     {
-        if (address(_token).code.length == 0) revert InvalidToken();
+        if (!isToken(_token)) revert InvalidToken();
 
         __DaoAuthorizableUpgradeable_init(_dao);
 
@@ -226,6 +227,6 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
 
     /// @dev The DAO's current balance of the streamed token
     function _daoBalance() internal view virtual returns (uint256) {
-        return token.balanceOf(address(dao()));
+        return tokenBalance(token, address(dao()));
     }
 }

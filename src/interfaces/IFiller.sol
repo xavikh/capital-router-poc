@@ -9,6 +9,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///         on that same caller. The filler pulls the offered tokens and must leave the DAO holding
 ///         at least `demandedAmount` more of `demandedToken` before returning.
 /// @dev Same selector as capital-router's `ISwapSolver.fillOffer`, so existing fillers keep working.
+///      Native ETH is `address(0)` on either side (never both): a native offer arrives as
+///      `msg.value` with no approval; a native demand must be sent to the DAO as ETH.
 interface IFiller {
     function fillOffer(
         IERC20 offeredToken,
@@ -16,5 +18,5 @@ interface IFiller {
         IERC20 demandedToken,
         uint256 demandedAmount,
         bytes calldata data
-    ) external;
+    ) external payable;
 }

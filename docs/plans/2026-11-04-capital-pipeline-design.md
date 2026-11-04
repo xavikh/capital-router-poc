@@ -29,7 +29,7 @@ Target flows:
 | Manager power | Free within installed flows (one `MANAGER_PERMISSION_ID`); installing flows is DAO-only. |
 | Pause and reentrancy | OpenZeppelin `PausableUpgradeable` and `ReentrancyGuardUpgradeable`. |
 | Failsafe | Independent flows live in separate plugins; `TriggerBatch` runs several with per-plugin "allowed to fail". |
-| Assets | ERC20 only. Native ETH unsupported. |
+| Assets | ERC20 and native ETH (`address(0)`) for budgets, action inputs and outputs, and splits. |
 
 ## Architecture
 
@@ -143,7 +143,7 @@ The DAO's whole balance of a token; commits nothing. For flows where something e
 
 ### `OpenFillAction`
 
-Dutch-auction swap bound to its stream budget: offers `min(input, maxOffered())`, demands `demandPerFill`, calls the filler back (`IFiller.fillOffer`), postcondition `assertReceived`. Price setters restart the auction. Carries the beneficiary on.
+Dutch-auction swap bound to its stream budget: offers `min(input, maxOffered())`, demands `demandPerFill`, calls the filler back (`IFiller.fillOffer`, payable), postcondition `assertReceived`. Price setters restart the auction. Carries the beneficiary on. Native ETH works on either side (never both): a native offer rides as call value with no approvals; a native demand is measured on the DAO's ETH balance.
 
 ### `MerkleClaimAction`
 
@@ -181,9 +181,14 @@ Installs the swap-and-split flow (`FundedStreamBudget` → `OpenFillAction` → 
 - Paused plugin: `Pausable: paused`. Re-entry: `ReentrancyGuard: reentrant call`.
 - Plugin errors: `DataLengthMismatch`, `InputTokenMismatch`, `InAmountExceedsInput`, `BeneficiaryChanged`, `AllocationExceedsOutput`, `InvalidOutToken`, `ActionTargetsDao`, `UnexpectedBalance(stage, account, token, expected, actual)`.
 
+## Native ETH
+
+`IERC20(address(0))` means native ETH everywhere (`src/lib/tokens.sol`): budgets read `dao.balance`, the plugin sends allocations as plain value transfers and checks `recipient.balance`, and `OpenFillAction` handles ETH on either side.
+
 ## Constraints and known limits
 
 - No fee-on-transfer or rebasing tokens, and no recipients that forward tokens on receipt: the balance checks reject them.
+- An ETH recipient without `receive()` reverts the whole flow (`ActionFailed`), so vet contract recipients of ETH splits.
 - One beneficiary per trigger. Batch Merkle claims by calling `trigger` several times in one transaction.
 - Claim + swap runs one swap per claim; the claimant gets the swap's declared minimum.
 - `FundedStreamBudget` freezes after deposits until someone calls `sync()`.
@@ -199,7 +204,6 @@ Installs the swap-and-split flow (`FundedStreamBudget` → `OpenFillAction` → 
 
 ## Out of scope
 
-- Native ETH.
 - A real `burn()` action (burn address works today).
 - Uniswap / oracle-priced swap actions (the coverage POC has working versions).
 - Gasless redirected claims (would need a signature from the account).

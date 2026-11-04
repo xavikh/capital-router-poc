@@ -121,6 +121,6 @@ contract FundedStreamBudgetTest is Fixture {
             FundedStreamBudget(ProxyLib.deployMinimalProxy(address(new FundedStreamBudget()), ""));
 
         vm.expectRevert(FundedStreamBudget.InvalidToken.selector);
-        _budget.initialize(dao, IERC20(address(0)), RATE, 0, EPOCH);
+        _budget.initialize(dao, IERC20(address(0xBEEF)), RATE, 0, EPOCH);
     }
 }

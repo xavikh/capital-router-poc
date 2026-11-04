@@ -25,7 +25,7 @@ contract BalanceBudgetTest is Fixture {
         BalanceBudget _budget = BalanceBudget(ProxyLib.deployMinimalProxy(address(new BalanceBudget()), ""));
 
         vm.expectRevert(BalanceBudget.InvalidToken.selector);
-        _budget.initialize(dao, IERC20(address(0)));
+        _budget.initialize(dao, IERC20(address(0xBEEF)));
     }
 }
 

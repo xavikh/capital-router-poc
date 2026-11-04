@@ -111,7 +111,7 @@ contract OpenFillActionTest is Fixture {
     function test_RevertWhen_DemandedTokenHasNoCode() public {
         OpenFillAction _action = _clone();
         vm.expectRevert(OpenFillAction.InvalidToken.selector);
-        _action.initialize(dao, budget, IERC20(address(0)), DEMAND, MIN_PRICE);
+        _action.initialize(dao, budget, IERC20(address(0xBEEF)), DEMAND, MIN_PRICE);
     }
 
     function test_RevertWhen_ZeroDemand() public {

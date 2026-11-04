@@ -66,12 +66,20 @@ abstract contract Fixture is Test {
 
     // Budgets
 
-    /// @dev Deploy after funding the DAO: the budget records the balance it sees at init
-    function _deployBudget(uint256 _rate, uint256 _maxBudget) internal returns (FundedStreamBudget _budget) {
+    /// @dev A stream of token A. Deploy after funding the DAO: the budget records the balance it sees at init.
+    function _deployBudget(uint256 _rate, uint256 _maxBudget) internal returns (FundedStreamBudget) {
+        return _deployStream(tokenA, _rate, _maxBudget);
+    }
+
+    /// @dev A stream of any token, or of native ETH (`IERC20(address(0))`)
+    function _deployStream(IERC20 _token, uint256 _rate, uint256 _maxBudget)
+        internal
+        returns (FundedStreamBudget _budget)
+    {
         _budget = FundedStreamBudget(
             ProxyLib.deployMinimalProxy(
                 address(new FundedStreamBudget()),
-                abi.encodeCall(FundedStreamBudget.initialize, (dao, tokenA, _rate, _maxBudget, EPOCH))
+                abi.encodeCall(FundedStreamBudget.initialize, (dao, _token, _rate, _maxBudget, EPOCH))
             )
         );
         dao.grant(address(_budget), manager, MANAGER_PERMISSION_ID);
@@ -124,12 +132,17 @@ abstract contract Fixture is Test {
 
     // Actions
 
-    /// @dev Bound to `_budget`, which it may restart when its price terms change
-    function _deployAction(FundedStreamBudget _budget) internal returns (OpenFillAction _action) {
+    /// @dev Demands token B. Bound to `_budget`, which it may restart when its price terms change.
+    function _deployAction(FundedStreamBudget _budget) internal returns (OpenFillAction) {
+        return _deployOpenFill(_budget, tokenB);
+    }
+
+    /// @dev Demands any token, or native ETH (`IERC20(address(0))`)
+    function _deployOpenFill(FundedStreamBudget _budget, IERC20 _demanded) internal returns (OpenFillAction _action) {
         _action = OpenFillAction(
             ProxyLib.deployMinimalProxy(
                 address(new OpenFillAction()),
-                abi.encodeCall(OpenFillAction.initialize, (dao, _budget, tokenB, DEMAND, MIN_PRICE))
+                abi.encodeCall(OpenFillAction.initialize, (dao, _budget, _demanded, DEMAND, MIN_PRICE))
             )
         );
         dao.grant(address(_action), manager, MANAGER_PERMISSION_ID);

@@ -51,7 +51,7 @@ contract MockFiller is IFiller {
         IERC20 _demandedToken,
         uint256 _demandedAmount,
         bytes calldata
-    ) external {
+    ) external payable {
         if (reenter) {
             try plugin.trigger(new bytes[](0)) {}
             catch (bytes memory _reason) {
@@ -59,10 +59,20 @@ contract MockFiller is IFiller {
             }
         }
 
-        _offeredToken.transferFrom(msg.sender, address(this), _offeredAmount);
+        // A native offer already arrived as msg.value; an ERC20 offer is pulled
+        if (address(_offeredToken) != address(0)) {
+            _offeredToken.transferFrom(msg.sender, address(this), _offeredAmount);
+        }
 
         uint256 _amount = uint256(int256(_demandedAmount) + fillDelta);
-        _demandedToken.transfer(msg.sender, _amount);
+        if (address(_demandedToken) == address(0)) {
+            (bool _ok,) = msg.sender.call{value: _amount}("");
+            require(_ok, "MockFiller: ETH send failed");
+        } else {
+            _demandedToken.transfer(msg.sender, _amount);
+        }
         totalDelivered += _amount;
     }
+
+    receive() external payable {}
 }
