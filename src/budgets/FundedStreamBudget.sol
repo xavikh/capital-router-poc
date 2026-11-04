@@ -3,6 +3,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
@@ -189,9 +190,9 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     function _available(uint256 _balance) internal view virtual returns (uint256 _amount) {
         _amount = baseAmount + (amountPerEpoch * (block.timestamp - baseTimestamp)) / epochInterval;
 
-        if (lastSeenBalance < _amount) _amount = lastSeenBalance;
-        if (_balance < _amount) _amount = _balance;
-        if (maxBudget != 0 && maxBudget < _amount) _amount = maxBudget;
+        _amount = Math.min(_amount, lastSeenBalance);
+        _amount = Math.min(_amount, _balance);
+        if (maxBudget != 0) _amount = Math.min(_amount, maxBudget);
     }
 
     function _sync() internal virtual {

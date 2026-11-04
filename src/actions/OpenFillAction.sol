@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
@@ -101,7 +102,7 @@ contract OpenFillAction is IStepAction, Initializable, DaoAuthorizableUpgradeabl
         virtual
         returns (Plan memory _plan, Action[] memory _actions)
     {
-        uint256 _offered = _draft.inAmount < maxOffered() ? _draft.inAmount : maxOffered();
+        uint256 _offered = Math.min(_draft.inAmount, maxOffered());
         if (_offered == 0) return (_plan, _actions);
 
         _plan = Plan({inToken: _draft.inToken, inAmount: _offered, outToken: demandedToken, outAmount: demandPerFill});
