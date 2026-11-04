@@ -7,7 +7,17 @@ import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/Proxy
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
 import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
 import {OpenFillAction} from "../../src/actions/OpenFillAction.sol";
-import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../../src/lib/constants.sol";
+import {CapitalPipelinePlugin} from "../../src/CapitalPipelinePlugin.sol";
+import {IBudget} from "../../src/interfaces/IBudget.sol";
+import {IStepAction} from "../../src/interfaces/IStepAction.sol";
+import {ISplitter} from "../../src/interfaces/ISplitter.sol";
+import {Step} from "../../src/lib/types.sol";
+import {
+    MANAGER_PERMISSION_ID,
+    CHECKPOINT_PERMISSION_ID,
+    TRIGGER_PERMISSION_ID,
+    CONFIGURE_PERMISSION_ID
+} from "../../src/lib/constants.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
 /// @notice A DAO holding the offered token A and some pre-existing demanded token B.
@@ -82,5 +92,27 @@ abstract contract Fixture is Test {
         );
         dao.grant(address(_action), manager, MANAGER_PERMISSION_ID);
         dao.grant(address(_budget), address(_action), CHECKPOINT_PERMISSION_ID);
+    }
+
+    /// @dev Same grants as CapitalPipelinePluginSetup: anyone triggers, the DAO configures, the manager pauses
+    function _deployPlugin(Step[] memory _pipeline) internal returns (CapitalPipelinePlugin _plugin) {
+        _plugin = CapitalPipelinePlugin(
+            ProxyLib.deployMinimalProxy(
+                address(new CapitalPipelinePlugin()), abi.encodeCall(CapitalPipelinePlugin.initialize, (dao, _pipeline))
+            )
+        );
+        dao.grant(address(dao), address(_plugin), dao.EXECUTE_PERMISSION_ID());
+        dao.grant(address(_plugin), ANY_ADDR, TRIGGER_PERMISSION_ID);
+        dao.grant(address(_plugin), address(dao), CONFIGURE_PERMISSION_ID);
+        dao.grant(address(_plugin), manager, MANAGER_PERMISSION_ID);
+    }
+
+    function _steps(IBudget _budget, IStepAction _action, ISplitter _splitter)
+        internal
+        pure
+        returns (Step[] memory _list)
+    {
+        _list = new Step[](1);
+        _list[0] = Step({budget: _budget, action: _action, splitter: _splitter});
     }
 }
