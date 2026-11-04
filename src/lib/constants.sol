@@ -7,11 +7,17 @@ bytes32 constant MANAGER_PERMISSION_ID = keccak256("MANAGER_PERMISSION");
 /// @dev Calls `trigger()` on the plugin
 bytes32 constant TRIGGER_PERMISSION_ID = keccak256("TRIGGER_PERMISSION");
 
-/// @dev Installs and removes steps. DAO only: a step can return arbitrary DAO actions.
+/// @dev Replaces the flow tree. DAO only: an action can return arbitrary DAO actions.
 bytes32 constant CONFIGURE_PERMISSION_ID = keccak256("CONFIGURE_PERMISSION");
 
 /// @dev Restarts a stream budget from zero
 bytes32 constant CHECKPOINT_PERMISSION_ID = keccak256("CHECKPOINT_PERMISSION");
+
+/// @dev Records a Merkle claim; granted to the DAO, which executes it inside the claim's node
+bytes32 constant RECORD_CLAIM_PERMISSION_ID = keccak256("RECORD_CLAIM_PERMISSION");
+
+/// @dev The most nodes a flow tree may have, which bounds the gas of a trigger
+uint256 constant MAX_NODES = 16;
 
 /// @dev Ratios are fractions of 1_000_000
 uint256 constant RATIO_BASE = 1_000_000;

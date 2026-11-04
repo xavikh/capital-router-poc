@@ -10,16 +10,22 @@ import {BalanceBudget} from "../../src/budgets/BalanceBudget.sol";
 import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
 import {OpenFillAction} from "../../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../../src/actions/MerkleClaimAction.sol";
+import {TransferAction} from "../../src/actions/TransferAction.sol";
+import {TransferToBeneficiaryAction} from "../../src/actions/TransferToBeneficiaryAction.sol";
+import {BurnAction} from "../../src/actions/BurnAction.sol";
+import {KeepAction} from "../../src/actions/KeepAction.sol";
+import {SplitTransferAction} from "../../src/actions/SplitTransferAction.sol";
 import {CapitalPipelinePlugin} from "../../src/CapitalPipelinePlugin.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
-import {IStageAction} from "../../src/interfaces/IStageAction.sol";
+import {INodeAction} from "../../src/interfaces/INodeAction.sol";
 import {ISplitter} from "../../src/interfaces/ISplitter.sol";
-import {Stage} from "../../src/lib/types.sol";
+import {Node} from "../../src/lib/types.sol";
 import {
     MANAGER_PERMISSION_ID,
     CHECKPOINT_PERMISSION_ID,
     TRIGGER_PERMISSION_ID,
-    CONFIGURE_PERMISSION_ID
+    CONFIGURE_PERMISSION_ID,
+    RECORD_CLAIM_PERMISSION_ID
 } from "../../src/lib/constants.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
@@ -28,8 +34,7 @@ import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 abstract contract Fixture is Test {
     address internal constant BURN = 0x000000000000000000000000000000000000dEaD;
     address internal constant ANY_ADDR = address(type(uint160).max);
-    IStageAction internal constant NO_ACTION = IStageAction(address(0));
-    ISplitter internal constant NO_SPLITTER = ISplitter(address(0));
+    INodeAction internal constant NO_ACTION = INodeAction(address(0));
 
     uint256 internal constant DAO_A = 100 ether; // offered token held by the DAO
     uint256 internal constant DAO_B = 500 ether; // pre-existing demanded token: must never be spent
@@ -43,6 +48,11 @@ abstract contract Fixture is Test {
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
+
+    // Stateless leaves: one deployment serves every plugin
+    BurnAction internal burn = new BurnAction();
+    KeepAction internal keep = new KeepAction();
+    TransferToBeneficiaryAction internal toBeneficiary = new TransferToBeneficiaryAction();
 
     DAO internal dao;
     ERC20Mock internal tokenA;
@@ -71,7 +81,7 @@ abstract contract Fixture is Test {
         return _deployStream(tokenA, _rate, _maxBudget);
     }
 
-    /// @dev A stream of any token, or of native ETH (`IERC20(address(0))`)
+    /// @dev A stream of any token, or of native ETH (`NATIVE`)
     function _deployStream(IERC20 _token, uint256 _rate, uint256 _maxBudget)
         internal
         returns (FundedStreamBudget _budget)
@@ -94,7 +104,7 @@ abstract contract Fixture is Test {
         );
     }
 
-    // Splitters
+    // Splitters (used by SplitTransferAction)
 
     /// @dev 95% to the burn address, 5% to the fee address
     function _deploySplitter() internal returns (RatioSplitter) {
@@ -106,15 +116,6 @@ abstract contract Fixture is Test {
         (_recipients[0], _recipients[1]) = (_a, _b);
         uint32[] memory _ratios = new uint32[](2);
         (_ratios[0], _ratios[1]) = (_ratioA, _ratioB);
-        return _deployRatio(_recipients, _ratios);
-    }
-
-    /// @dev 100% to one recipient
-    function _deployRatio(address _recipient) internal returns (RatioSplitter) {
-        address[] memory _recipients = new address[](1);
-        _recipients[0] = _recipient;
-        uint32[] memory _ratios = new uint32[](1);
-        _ratios[0] = 1_000_000;
         return _deployRatio(_recipients, _ratios);
     }
 
@@ -137,7 +138,7 @@ abstract contract Fixture is Test {
         return _deployOpenFill(_budget, tokenB);
     }
 
-    /// @dev Demands any token, or native ETH (`IERC20(address(0))`)
+    /// @dev Demands any token, or native ETH (`NATIVE`)
     function _deployOpenFill(FundedStreamBudget _budget, IERC20 _demanded) internal returns (OpenFillAction _action) {
         _action = OpenFillAction(
             ProxyLib.deployMinimalProxy(
@@ -156,16 +157,31 @@ abstract contract Fixture is Test {
             )
         );
         dao.grant(address(_merkle), manager, MANAGER_PERMISSION_ID);
+        dao.grant(address(_merkle), address(dao), RECORD_CLAIM_PERMISSION_ID);
+    }
+
+    function _deployTransfer(address _to) internal returns (TransferAction) {
+        return TransferAction(
+            ProxyLib.deployMinimalProxy(address(new TransferAction()), abi.encodeCall(TransferAction.initialize, (_to)))
+        );
+    }
+
+    function _deploySplitTransfer(ISplitter _splitter) internal returns (SplitTransferAction) {
+        return SplitTransferAction(
+            ProxyLib.deployMinimalProxy(
+                address(new SplitTransferAction()), abi.encodeCall(SplitTransferAction.initialize, (_splitter))
+            )
+        );
     }
 
     // Plugin
 
     /// @dev Same grants as CapitalPipelinePluginSetup: anyone triggers, the DAO configures, the manager pauses
-    function _deployPlugin(IBudget _budget, Stage[] memory _flow) internal returns (CapitalPipelinePlugin _plugin) {
+    function _deployPlugin(IBudget _budget, Node[] memory _tree) internal returns (CapitalPipelinePlugin _plugin) {
         _plugin = CapitalPipelinePlugin(
             ProxyLib.deployMinimalProxy(
                 address(new CapitalPipelinePlugin()),
-                abi.encodeCall(CapitalPipelinePlugin.initialize, (dao, _budget, _flow))
+                abi.encodeCall(CapitalPipelinePlugin.initialize, (dao, _budget, _tree))
             )
         );
         dao.grant(address(dao), address(_plugin), dao.EXECUTE_PERMISSION_ID());
@@ -174,18 +190,58 @@ abstract contract Fixture is Test {
         dao.grant(address(_plugin), manager, MANAGER_PERMISSION_ID);
     }
 
-    function _one(IStageAction _action, ISplitter _splitter) internal pure returns (Stage[] memory _flow) {
-        _flow = new Stage[](1);
-        _flow[0] = Stage({action: _action, splitter: _splitter});
+    // Trees
+
+    /// @dev A single node with no children
+    function _leaf(INodeAction _action) internal pure returns (Node memory _node) {
+        _node.action = _action;
     }
 
-    function _two(IStageAction _action0, ISplitter _splitter0, IStageAction _action1, ISplitter _splitter1)
+    /// @dev A node with one child
+    function _then(INodeAction _action, uint32 _child) internal pure returns (Node memory _node) {
+        _node.action = _action;
+        _node.children = new uint32[](1);
+        _node.children[0] = _child;
+    }
+
+    /// @dev A node with two children, split by weights (fractions of RATIO_BASE)
+    function _branch(INodeAction _action, uint32 _childA, uint32 _weightA, uint32 _childB, uint32 _weightB)
         internal
         pure
-        returns (Stage[] memory _flow)
+        returns (Node memory _node)
     {
-        _flow = new Stage[](2);
-        _flow[0] = Stage({action: _action0, splitter: _splitter0});
-        _flow[1] = Stage({action: _action1, splitter: _splitter1});
+        _node.action = _action;
+        _node.children = new uint32[](2);
+        (_node.children[0], _node.children[1]) = (_childA, _childB);
+        _node.weights = new uint32[](2);
+        (_node.weights[0], _node.weights[1]) = (_weightA, _weightB);
+    }
+
+    /// @dev A one-node tree
+    function _one(INodeAction _action) internal pure returns (Node[] memory _tree) {
+        _tree = new Node[](1);
+        _tree[0] = _leaf(_action);
+    }
+
+    /// @dev `_a` → `_b`
+    function _chain(INodeAction _a, INodeAction _b) internal pure returns (Node[] memory _tree) {
+        _tree = new Node[](2);
+        (_tree[0], _tree[1]) = (_then(_a, 1), _leaf(_b));
+    }
+
+    /// @dev `_a` → `_b` → `_c`
+    function _chain(INodeAction _a, INodeAction _b, INodeAction _c) internal pure returns (Node[] memory _tree) {
+        _tree = new Node[](3);
+        (_tree[0], _tree[1], _tree[2]) = (_then(_a, 1), _then(_b, 2), _leaf(_c));
+    }
+
+    /// @dev `_root` split by weight between two leaves
+    function _fork(INodeAction _root, uint32 _weightA, INodeAction _a, uint32 _weightB, INodeAction _b)
+        internal
+        pure
+        returns (Node[] memory _tree)
+    {
+        _tree = new Node[](3);
+        (_tree[0], _tree[1], _tree[2]) = (_branch(_root, 1, _weightA, 2, _weightB), _leaf(_a), _leaf(_b));
     }
 }

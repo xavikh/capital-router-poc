@@ -2,9 +2,10 @@
 pragma solidity ^0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
-/// @notice Anyone can mint. Test only.
-contract ERC20Mock is ERC20 {
+/// @notice Anyone can mint; holders can burn. Test only.
+contract ERC20Mock is ERC20Burnable {
     constructor(string memory _name, string memory _symbol) ERC20(_name, _symbol) {}
 
     function mint(address _to, uint256 _amount) external {

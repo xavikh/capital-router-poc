@@ -8,88 +8,86 @@ import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {IExecutor, Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {PluginCloneable} from "@aragon/osx-commons-contracts/src/plugin/PluginCloneable.sol";
 import {IBudget} from "./interfaces/IBudget.sol";
-import {ISplitter} from "./interfaces/ISplitter.sol";
-import {Plan, Allocation, Stage} from "./lib/types.sol";
-import {TRIGGER_PERMISSION_ID, CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "./lib/constants.sol";
-import {tokenBalance, transferAction, isToken} from "./lib/tokens.sol";
+import {INodeAction} from "./interfaces/INodeAction.sol";
+import {Plan, Node} from "./lib/types.sol";
+import {
+    TRIGGER_PERMISSION_ID,
+    CONFIGURE_PERMISSION_ID,
+    MANAGER_PERMISSION_ID,
+    RATIO_BASE,
+    MAX_NODES
+} from "./lib/constants.sol";
+import {tokenBalance, isToken} from "./lib/tokens.sol";
 
 /// @title CapitalPipelinePlugin
-/// @notice Runs one flow: the budget is read once, then each stage runs its action
-///         (preconditions → build → postconditions) and its splitter, and passes what it didn't
-///         transfer out to the next stage. The budget commits once, after the last stage.
-/// @dev Each stage is planned (view) right before it executes in its own `dao.execute`, so it
-///      always sees real balances. After every stage the plugin checks balances: each recipient
-///      received its allocation, the DAO received the declared output, and the DAO spent no more
-///      than the declared input. That makes each stage's leftover safe for the next stage to spend.
+/// @notice Runs one flow: a budget feeding a tree of actions. The budget is read once; the root
+///         node takes up to what it allows; every node passes its output to its children (split by
+///         fixed weights when there are several); leaves consume what they receive (transfer, burn,
+///         keep). The budget commits once, after the whole tree ran.
+/// @dev Every node must succeed: the root takes a non-zero amount, every other node takes exactly
+///      its input, and leaves output nothing. Anything else reverts the whole trigger.
+///      Each node with an action is planned (view) right after its parent ran and executes in its
+///      own `dao.execute`, followed by balance checks: the DAO spent no more than the node's input
+///      and received at least its declared output. Recipient checks are the actions' own postconditions.
 contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, ReentrancyGuardUpgradeable {
-    /// @dev Balances taken right before a stage executes
-    struct Snapshot {
-        uint256 inBalance;
-        uint256 outBalance;
-        uint256 transferred;
-        uint256 recipientCount;
-        address[] recipients;
-        uint256[] expected;
-    }
-
     /// @notice What the flow may spend; read at the start, committed at the end
     IBudget public budget;
 
-    Stage[] internal _stages;
+    Node[] internal _nodes;
 
     /// @dev Makes every execution ID unique
     uint256 internal _nonce;
 
-    event FlowUpdated(IBudget budget, Stage[] stages);
-    event StageExecuted(uint256 indexed stageIndex, address indexed caller, bytes32 executionId, Plan plan);
+    event FlowUpdated(IBudget budget, Node[] nodes);
+    event NodeExecuted(uint256 indexed nodeIndex, address indexed caller, bytes32 executionId, Plan plan);
     event BudgetCommitted(bytes32 executionId);
 
+    // Configuration errors
     error NoBudget();
-    error NoStages();
-    error EmptyStage(uint256 stageIndex);
-    error BudgetMismatch(uint256 stageIndex);
-    error DataLengthMismatch(uint256 expected, uint256 actual);
-    error InputTokenMismatch(uint256 stageIndex);
-    error InAmountExceedsInput(uint256 stageIndex, uint256 inAmount, uint256 input);
-    error BeneficiaryChanged(uint256 stageIndex);
-    error AllocationExceedsOutput(uint256 stageIndex, uint256 allocated, uint256 outAmount);
-    error InvalidOutToken(uint256 stageIndex);
-    error ActionTargetsDao(uint256 stageIndex, uint256 actionIndex);
-    error UnexpectedBalance(uint256 stageIndex, address account, address token, uint256 expected, uint256 actual);
+    error InvalidNodeCount(uint256 count);
+    error MissingAction(uint256 nodeIndex);
+    error InvalidChild(uint256 nodeIndex, uint256 childIndex);
+    error UnreachableNode(uint256 nodeIndex);
+    error InvalidWeights(uint256 nodeIndex);
+    error BudgetMismatch(uint256 nodeIndex);
 
-    function initialize(IDAO _dao, IBudget _budget, Stage[] calldata _newStages) external initializer {
+    // Trigger errors
+    error DataLengthMismatch(uint256 expected, uint256 actual);
+    error EmptyInput(uint256 nodeIndex);
+    error InputTokenMismatch(uint256 nodeIndex);
+    error InAmountExceedsInput(uint256 nodeIndex, uint256 inAmount, uint256 input);
+    error NodeIncomplete(uint256 nodeIndex, uint256 inAmount, uint256 input);
+    error LeafLeftOutput(uint256 nodeIndex, uint256 outAmount);
+    error InvalidOutToken(uint256 nodeIndex);
+    error BeneficiaryChanged(uint256 nodeIndex);
+    error ActionTargetsDao(uint256 nodeIndex, uint256 actionIndex);
+    error ActionTargetsPlugin(uint256 nodeIndex, uint256 actionIndex);
+    error UnexpectedBalance(uint256 nodeIndex, address token, uint256 expected, uint256 actual);
+
+    function initialize(IDAO _dao, IBudget _budget, Node[] calldata _newNodes) external initializer {
         __PluginCloneable_init(_dao);
         __Pausable_init();
         __ReentrancyGuard_init();
-        _setFlow(_budget, _newStages);
+        _setFlow(_budget, _newNodes);
     }
 
     /// @notice Runs the flow
-    /// @param _data Empty, or one entry per stage (passed to that stage's action)
+    /// @param _data Empty, or one entry per node (passed to that node's action)
     function trigger(bytes[] calldata _data) external nonReentrant whenNotPaused auth(TRIGGER_PERMISSION_ID) {
-        uint256 _len = _stages.length;
+        uint256 _len = _nodes.length;
         if (_data.length != 0 && _data.length != _len) revert DataLengthMismatch(_len, _data.length);
 
         uint256 _callNonce = _nonce++;
         IERC20 _token = budget.token();
         uint256 _available = budget.available();
-        Plan memory _input = Plan(_token, _available, _token, _available, address(0));
-        Plan memory _first;
 
-        for (uint256 i; i < _len && _input.inAmount != 0; ++i) {
-            Plan memory _plan;
-            (_plan, _input) = _runStage(i, _input, _data.length == 0 ? msg.data[0:0] : _data[i], _callNonce);
-            if (_plan.inAmount == 0) break; // this stage and the rest are skipped
-            if (i == 0) _first = _plan;
-        }
-
-        // The budget is consumed once the first stage ran. A skipped first stage leaves it untouched.
-        if (_first.inAmount != 0) _commitBudget(_first, _callNonce);
+        Plan memory _root = _runNode(0, Plan(_token, _available, _token, _available, address(0)), _data, _callNonce);
+        _commitBudget(_root, _callNonce);
     }
 
     /// @notice Replaces the flow. DAO only: an action can return arbitrary DAO actions.
-    function setFlow(IBudget _budget, Stage[] calldata _newStages) external auth(CONFIGURE_PERMISSION_ID) {
-        _setFlow(_budget, _newStages);
+    function setFlow(IBudget _budget, Node[] calldata _newNodes) external nonReentrant auth(CONFIGURE_PERMISSION_ID) {
+        _setFlow(_budget, _newNodes);
     }
 
     /// @notice Stops the flow until `unpause`
@@ -102,85 +100,84 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         _unpause();
     }
 
-    function stages() external view returns (Stage[] memory) {
-        return _stages;
+    function nodes() external view returns (Node[] memory) {
+        return _nodes;
     }
 
-    // Stage execution
+    // Running the tree
 
-    /// @return _plan What the stage did (`inAmount == 0` if it was skipped)
-    /// @return _next The next stage's input: what this stage produced and didn't transfer out
-    function _runStage(uint256 _index, Plan memory _draft, bytes calldata _data, uint256 _callNonce)
+    /// @dev Runs node `_index` on `_input`, then its children, depth first. Returns the node's plan.
+    function _runNode(uint256 _index, Plan memory _input, bytes[] calldata _data, uint256 _callNonce)
         internal
-        returns (Plan memory _plan, Plan memory _next)
+        returns (Plan memory _plan)
     {
+        if (_input.inAmount == 0) revert EmptyInput(_index);
+
+        Node storage _node = _nodes[_index];
+        if (address(_node.action) == address(0)) {
+            _plan = _input; // a branch without an action passes its input on
+        } else {
+            bytes calldata _nodeData = _data.length == 0 ? msg.data[0:0] : _data[_index];
+            _plan = _runAction(_index, _node.action, _input, _nodeData, _node.children.length == 0, _callNonce);
+        }
+
+        _runChildren(_node, _plan, _data, _callNonce);
+    }
+
+    function _runChildren(Node storage _node, Plan memory _plan, bytes[] calldata _data, uint256 _callNonce) internal {
+        uint256 _count = _node.children.length;
+        if (_count == 0) return;
+        if (_count == 1) {
+            _runNode(_node.children[0], _childInput(_plan, _plan.outAmount), _data, _callNonce);
+            return;
+        }
+
+        uint256[] memory _amounts = _weighted(_plan.outAmount, _node.weights);
+        for (uint256 k; k < _count; ++k) {
+            _runNode(_node.children[k], _childInput(_plan, _amounts[k]), _data, _callNonce);
+        }
+    }
+
+    function _runAction(
+        uint256 _index,
+        INodeAction _action,
+        Plan memory _draft,
+        bytes calldata _data,
+        bool _leaf,
+        uint256 _callNonce
+    ) internal returns (Plan memory _plan) {
         Action[] memory _actions;
-        Allocation[] memory _transfers;
-        (_plan, _actions, _transfers) = _planStage(_index, _stages[_index], _draft, _data);
-        if (_plan.inAmount == 0) return (_plan, _next);
+        (_plan, _actions) = _planAction(_index, _action, _draft, _data, _leaf);
 
-        Snapshot memory _before = _snapshot(_plan, _transfers);
-
+        (uint256 _inBefore, uint256 _outBefore) = _snapshot(_plan);
         bytes32 _executionId = keccak256(abi.encode(address(this), _callNonce, _index));
         _execute(_index, _actions, _executionId);
-        _verify(_index, _plan, _before);
+        _verify(_index, _plan, _inBefore, _outBefore);
 
-        uint256 _leftover = _plan.outAmount - _before.transferred;
-        _next = Plan(_plan.outToken, _leftover, _plan.outToken, _leftover, _plan.beneficiary);
-
-        emit StageExecuted(_index, msg.sender, _executionId, _plan);
+        emit NodeExecuted(_index, msg.sender, _executionId, _plan);
     }
 
-    /// @dev Calls the stage's components in order and concatenates their actions
-    function _planStage(uint256 _index, Stage memory _stage, Plan memory _draft, bytes calldata _data)
+    /// @dev Calls the action's hooks in order and checks its plan against the node's input
+    function _planAction(uint256 _index, INodeAction _action, Plan memory _draft, bytes calldata _data, bool _leaf)
         internal
         view
-        returns (Plan memory _plan, Action[] memory _actions, Allocation[] memory _transfers)
+        returns (Plan memory _plan, Action[] memory _actions)
     {
-        _plan = _draft;
+        _action.preconditions(msg.sender, _draft);
         Action[] memory _work;
-        Action[] memory _checks;
+        (_plan, _work) = _action.build(msg.sender, _data, _draft);
 
-        if (address(_stage.action) != address(0)) {
-            _stage.action.preconditions(msg.sender, _draft);
-            (_plan, _work) = _stage.action.build(msg.sender, _data, _draft);
-            if (_plan.inAmount == 0) return (_plan, _actions, _transfers);
-
-            if (_plan.inToken != _draft.inToken) revert InputTokenMismatch(_index);
-            _plan.beneficiary = _keepBeneficiary(_index, _draft.beneficiary, _plan.beneficiary);
-            _checks = _stage.action.postconditions(msg.sender, _plan);
-        }
         if (_plan.inAmount > _draft.inAmount) revert InAmountExceedsInput(_index, _plan.inAmount, _draft.inAmount);
+        // The root may take less than the budget allows (but something); every other node takes all of it
+        if (_plan.inAmount == 0 || (_index != 0 && _plan.inAmount != _draft.inAmount)) {
+            revert NodeIncomplete(_index, _plan.inAmount, _draft.inAmount);
+        }
+        if (_plan.inToken != _draft.inToken) revert InputTokenMismatch(_index);
+        if (_leaf && _plan.outAmount != 0) revert LeafLeftOutput(_index, _plan.outAmount);
         if (_plan.outAmount != 0 && !isToken(_plan.outToken)) revert InvalidOutToken(_index);
+        _plan.beneficiary = _keepBeneficiary(_index, _draft.beneficiary, _plan.beneficiary);
 
-        _transfers = _split(_index, _stage.splitter, _plan);
-        _actions = _concat(_work, _checks, _transferActions(_plan.outToken, _transfers));
-    }
-
-    /// @dev Non-zero allocations to anyone but the DAO. Allocations to the DAO stay as leftover.
-    function _split(uint256 _index, ISplitter _splitter, Plan memory _plan)
-        internal
-        view
-        returns (Allocation[] memory _transfers)
-    {
-        if (address(_splitter) == address(0) || _plan.outAmount == 0) return _transfers;
-
-        Allocation[] memory _allocations = _splitter.split(_plan);
-        address _dao = address(dao());
-
-        uint256 _total;
-        uint256 _count;
-        for (uint256 i; i < _allocations.length; ++i) {
-            _total += _allocations[i].amount;
-            if (_allocations[i].amount != 0 && _allocations[i].recipient != _dao) ++_count;
-        }
-        if (_total > _plan.outAmount) revert AllocationExceedsOutput(_index, _total, _plan.outAmount);
-
-        _transfers = new Allocation[](_count);
-        uint256 _j;
-        for (uint256 i; i < _allocations.length; ++i) {
-            if (_allocations[i].amount != 0 && _allocations[i].recipient != _dao) _transfers[_j++] = _allocations[i];
-        }
+        _actions = _concat(_work, _action.postconditions(msg.sender, _plan));
     }
 
     function _execute(uint256 _index, Action[] memory _actions, bytes32 _executionId) internal {
@@ -189,74 +186,67 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         address _dao = address(dao());
         for (uint256 i; i < _actions.length; ++i) {
             if (_actions[i].to == _dao) revert ActionTargetsDao(_index, i);
+            if (_actions[i].to == address(this)) revert ActionTargetsPlugin(_index, i);
         }
         IExecutor(_dao).execute(_executionId, _actions, 0);
     }
 
-    function _commitBudget(Plan memory _first, uint256 _callNonce) internal {
-        Action[] memory _actions = budget.commitActions(_first);
+    /// @dev After the whole tree ran, so a stream checkpoint sees the final balance
+    function _commitBudget(Plan memory _root, uint256 _callNonce) internal {
+        Action[] memory _actions = budget.commitActions(_root);
         if (_actions.length == 0) return;
 
         bytes32 _executionId = keccak256(abi.encode(address(this), _callNonce, type(uint256).max));
-        _execute(_stages.length, _actions, _executionId);
+        _execute(_nodes.length, _actions, _executionId);
         emit BudgetCommitted(_executionId);
     }
 
     // Balance checks
 
-    /// @dev Records the DAO's in/out balances and, per unique recipient, the balance it must reach
-    function _snapshot(Plan memory _plan, Allocation[] memory _transfers) internal view returns (Snapshot memory _s) {
+    function _snapshot(Plan memory _plan) internal view returns (uint256 _inBefore, uint256 _outBefore) {
         address _dao = address(dao());
-        _s.inBalance = tokenBalance(_plan.inToken, _dao);
-        if (_plan.outToken != _plan.inToken && _plan.outAmount != 0) {
-            _s.outBalance = tokenBalance(_plan.outToken, _dao);
-        }
-
-        _s.recipients = new address[](_transfers.length);
-        _s.expected = new uint256[](_transfers.length);
-        for (uint256 i; i < _transfers.length; ++i) {
-            _s.transferred += _transfers[i].amount;
-
-            uint256 k;
-            while (k < _s.recipientCount && _s.recipients[k] != _transfers[i].recipient) ++k;
-            if (k == _s.recipientCount) {
-                _s.recipients[k] = _transfers[i].recipient;
-                _s.expected[k] = tokenBalance(_plan.outToken, _transfers[i].recipient);
-                ++_s.recipientCount;
-            }
-            _s.expected[k] += _transfers[i].amount;
-        }
+        _inBefore = tokenBalance(_plan.inToken, _dao);
+        if (_plan.outToken != _plan.inToken && _plan.outAmount != 0) _outBefore = tokenBalance(_plan.outToken, _dao);
     }
 
-    function _verify(uint256 _index, Plan memory _plan, Snapshot memory _s) internal view {
-        for (uint256 k; k < _s.recipientCount; ++k) {
-            uint256 _actual = tokenBalance(_plan.outToken, _s.recipients[k]);
-            if (_actual < _s.expected[k]) {
-                revert UnexpectedBalance(_index, _s.recipients[k], address(_plan.outToken), _s.expected[k], _actual);
-            }
-        }
-
+    /// @dev The DAO spent at most `inAmount` and received at least `outAmount`
+    function _verify(uint256 _index, Plan memory _plan, uint256 _inBefore, uint256 _outBefore) internal view {
         if (_plan.outToken == _plan.inToken) {
-            // One token: it may drop by at most the input, and must gain the output, net of transfers
-            _checkDao(_index, _plan.inToken, _s.inBalance + _plan.outAmount, _plan.inAmount + _s.transferred);
+            _checkDao(_index, _plan.inToken, _inBefore + _plan.outAmount, _plan.inAmount);
         } else {
-            _checkDao(_index, _plan.inToken, _s.inBalance, _plan.inAmount);
-            if (_plan.outAmount != 0) {
-                _checkDao(_index, _plan.outToken, _s.outBalance + _plan.outAmount, _s.transferred);
-            }
+            _checkDao(_index, _plan.inToken, _inBefore, _plan.inAmount);
+            if (_plan.outAmount != 0) _checkDao(_index, _plan.outToken, _outBefore + _plan.outAmount, 0);
         }
     }
 
     /// @dev Reverts unless `balance + spent >= target`
     function _checkDao(uint256 _index, IERC20 _token, uint256 _target, uint256 _spent) internal view {
-        address _dao = address(dao());
-        uint256 _actual = tokenBalance(_token, _dao);
+        uint256 _actual = tokenBalance(_token, address(dao()));
         if (_actual + _spent < _target) {
-            revert UnexpectedBalance(_index, _dao, address(_token), _target > _spent ? _target - _spent : 0, _actual);
+            revert UnexpectedBalance(_index, address(_token), _target > _spent ? _target - _spent : 0, _actual);
         }
     }
 
     // Helpers
+
+    function _childInput(Plan memory _plan, uint256 _amount) internal pure returns (Plan memory) {
+        return Plan(_plan.outToken, _amount, _plan.outToken, _amount, _plan.beneficiary);
+    }
+
+    /// @dev Splits `_amount` by `_weights`; the rounding remainder goes to the largest weight
+    function _weighted(uint256 _amount, uint32[] storage _weights) internal view returns (uint256[] memory _amounts) {
+        uint256 _count = _weights.length;
+        _amounts = new uint256[](_count);
+
+        uint256 _assigned;
+        uint256 _largest;
+        for (uint256 k; k < _count; ++k) {
+            _amounts[k] = (_amount * _weights[k]) / RATIO_BASE;
+            _assigned += _amounts[k];
+            if (_weights[k] > _weights[_largest]) _largest = k;
+        }
+        _amounts[_largest] += _amount - _assigned;
+    }
 
     /// @dev Once set, the beneficiary carries on; an action may leave it unset but not change it
     function _keepBeneficiary(uint256 _index, address _current, address _proposed) internal pure returns (address) {
@@ -265,51 +255,70 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         revert BeneficiaryChanged(_index);
     }
 
-    function _transferActions(IERC20 _token, Allocation[] memory _transfers)
-        internal
-        pure
-        returns (Action[] memory _actions)
-    {
-        _actions = new Action[](_transfers.length);
-        for (uint256 i; i < _transfers.length; ++i) {
-            _actions[i] = transferAction(_token, _transfers[i].recipient, _transfers[i].amount);
-        }
-    }
-
-    function _concat(Action[] memory _a, Action[] memory _b, Action[] memory _c)
-        internal
-        pure
-        returns (Action[] memory _out)
-    {
-        _out = new Action[](_a.length + _b.length + _c.length);
-        uint256 _k;
+    function _concat(Action[] memory _a, Action[] memory _b) internal pure returns (Action[] memory _out) {
+        _out = new Action[](_a.length + _b.length);
         for (uint256 i; i < _a.length; ++i) {
-            _out[_k++] = _a[i];
+            _out[i] = _a[i];
         }
         for (uint256 i; i < _b.length; ++i) {
-            _out[_k++] = _b[i];
-        }
-        for (uint256 i; i < _c.length; ++i) {
-            _out[_k++] = _c[i];
+            _out[_a.length + i] = _b[i];
         }
     }
 
-    function _setFlow(IBudget _budget, Stage[] calldata _newStages) internal {
-        if (address(_budget) == address(0)) revert NoBudget();
-        if (_newStages.length == 0) revert NoStages();
+    // Configuration
 
-        delete _stages;
-        for (uint256 i; i < _newStages.length; ++i) {
-            Stage calldata _stage = _newStages[i];
-            if (address(_stage.action) == address(0) && address(_stage.splitter) == address(0)) revert EmptyStage(i);
-            if (address(_stage.action) != address(0)) {
-                IBudget _bound = _stage.action.budget();
-                if (address(_bound) != address(0) && (i != 0 || _bound != _budget)) revert BudgetMismatch(i);
-            }
-            _stages.push(_stage);
+    function _setFlow(IBudget _budget, Node[] calldata _newNodes) internal {
+        if (address(_budget) == address(0)) revert NoBudget();
+        uint256 _len = _newNodes.length;
+        if (_len == 0 || _len > MAX_NODES) revert InvalidNodeCount(_len);
+
+        delete _nodes;
+        bool[] memory _hasParent = new bool[](_len);
+        for (uint256 i; i < _len; ++i) {
+            _checkNode(i, _newNodes[i], _budget, _hasParent);
+
+            Node storage _stored = _nodes.push();
+            _stored.action = _newNodes[i].action;
+            _stored.children = _newNodes[i].children;
+            _stored.weights = _newNodes[i].weights;
+        }
+        for (uint256 i = 1; i < _len; ++i) {
+            if (!_hasParent[i]) revert UnreachableNode(i);
         }
         budget = _budget;
 
-        emit FlowUpdated(_budget, _newStages);
+        emit FlowUpdated(_budget, _newNodes);
+    }
+
+    /// @dev Children come after their parent and have exactly one parent, so the nodes form a tree
+    ///      rooted at node 0 with no cycles. Weights are only for branches and sum to RATIO_BASE.
+    function _checkNode(uint256 _index, Node calldata _node, IBudget _budget, bool[] memory _hasParent) internal view {
+        uint256 _count = _node.children.length;
+        if (address(_node.action) == address(0)) {
+            if (_count < 2) revert MissingAction(_index);
+        } else {
+            IBudget _bound = _node.action.budget();
+            if (address(_bound) != address(0) && (_index != 0 || _bound != _budget)) revert BudgetMismatch(_index);
+        }
+
+        for (uint256 k; k < _count; ++k) {
+            uint256 _child = _node.children[k];
+            if (_child <= _index || _child >= _hasParent.length || _hasParent[_child]) {
+                revert InvalidChild(_index, _child);
+            }
+            _hasParent[_child] = true;
+        }
+
+        if (_count < 2) {
+            if (_node.weights.length != 0) revert InvalidWeights(_index);
+            return;
+        }
+        if (_node.weights.length != _count) revert InvalidWeights(_index);
+        uint256 _sum;
+        for (uint256 k; k < _count; ++k) {
+            if (_node.weights[k] == 0) revert InvalidWeights(_index);
+            _sum += _node.weights[k];
+        }
+        if (_sum != RATIO_BASE) revert InvalidWeights(_index);
     }
 }

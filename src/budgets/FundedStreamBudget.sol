@@ -37,7 +37,7 @@ import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.
 ///        where it froze. Calling it repeatedly does not change the curve (at most 1 wei of
 ///        rounding per call).
 ///      - `writeCheckpoint()` restarts the amount from zero and records the balance left after
-///        the spend. The plugin appends it as the last action of every step (`commitActions`).
+///        the spend. The plugin runs it once, after the whole flow (`commitActions`).
 ///      - The DAO balance itself caps the amount if funds leave by another path after the last
 ///        sync.
 ///      - Every setter syncs first, so a parameter change never alters what has already accrued.
@@ -51,7 +51,7 @@ import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.
 ///      stale balance and, in an auction, the action's `maxOffered()`. Proposals that spend the
 ///      token should include a `sync()` action.
 ///
-///      One step per instance.
+///      One flow per instance.
 contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizableUpgradeable {
     /// @notice The token streamed
     IERC20 public token;
@@ -95,7 +95,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     /// @param lastSeenBalance The DAO balance seen by the sync
     event Synced(uint256 baseAmount, uint256 lastSeenBalance);
 
-    /// @notice Thrown when the token is neither native ETH (address(0)) nor a contract
+    /// @notice Thrown when the token is neither native ETH (`NATIVE`) nor a contract
     error InvalidToken();
 
     /// @notice Thrown when the given epoch interval is zero
@@ -110,7 +110,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     /// @dev A DAO that holds no tokens at initialization keeps the amount at zero until `sync()`
     ///      is called after it is funded.
     /// @param _dao The DAO holding the funds
-    /// @param _token The token streamed (address(0) for native ETH)
+    /// @param _token The token streamed (`NATIVE` for native ETH)
     /// @param _amountPerEpoch How much the available amount grows per epoch
     /// @param _maxBudget Maximum available amount at any point in time (0 for no cap)
     /// @param _epochInterval The epoch duration in seconds
@@ -140,7 +140,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
         return _available(_daoBalance());
     }
 
-    /// @notice Restarts the stream after the spend: the plugin appends this as the step's last action
+    /// @notice Restarts the stream after the spend: the plugin executes this once, after the whole flow
     function commitActions(Plan calldata) external view virtual returns (Action[] memory _actions) {
         _actions = new Action[](1);
         _actions[0] = Action({to: address(this), value: 0, data: abi.encodeCall(this.writeCheckpoint, ())});
@@ -156,7 +156,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     }
 
     /// @notice Restarts the amount from zero and records the DAO balance
-    /// @dev Executed by the DAO as a step's last action, so the recorded balance is what is left
+    /// @dev Executed by the DAO after the whole flow ran, so the recorded balance is what is left
     ///      after the tokens have been handed over. Also called by a bound action to restart its
     ///      auction when its price terms change.
     function writeCheckpoint() external virtual auth(CHECKPOINT_PERMISSION_ID) {

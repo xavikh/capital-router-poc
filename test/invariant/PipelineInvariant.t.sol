@@ -35,7 +35,8 @@ contract Handler is Test {
     }
 
     function fill() external {
-        filler.fill("");
+        if (budget.available() == 0) return; // nothing on offer: a trigger would revert by design
+        filler.fillWithoutData();
     }
 
     function deposit(uint256 _amount) external {
@@ -76,7 +77,7 @@ contract PipelineInvariantTest is Fixture {
         super.setUp();
         FundedStreamBudget _budget = _deployBudget(RATE, 0);
         OpenFillAction _action = _deployAction(_budget);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _one(_action, _deploySplitter()));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _chain(_action, _deploySplitTransfer(_deploySplitter())));
 
         filler = new MockFiller(_plugin);
         tokenB.mint(address(filler), type(uint128).max);

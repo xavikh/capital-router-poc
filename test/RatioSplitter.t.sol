@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth/auth.sol";
 import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
-import {Allocation, Plan} from "../src/lib/types.sol";
+import {Allocation} from "../src/lib/types.sol";
 import {MANAGER_PERMISSION_ID, RATIO_BASE} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 
@@ -16,7 +16,7 @@ contract RatioSplitterTest is Fixture {
     }
 
     function test_SplitsNinetyFiveFive() public view {
-        Allocation[] memory _allocations = splitter.split(_output(1000 ether));
+        Allocation[] memory _allocations = splitter.split(1000 ether);
 
         assertEq(_allocations.length, 2);
         assertEq(_allocations[0].recipient, BURN);
@@ -26,7 +26,7 @@ contract RatioSplitterTest is Fixture {
     }
 
     function test_RemainderGoesToLargestShare() public view {
-        Allocation[] memory _allocations = splitter.split(_output(1)); // both shares round down to 0
+        Allocation[] memory _allocations = splitter.split(1); // both shares round down to 0
 
         assertEq(_allocations[0].amount, 1);
         assertEq(_allocations[1].amount, 0);
@@ -37,7 +37,7 @@ contract RatioSplitterTest is Fixture {
         _ratio = bound(_ratio, 0, RATIO_BASE);
         _set(uint32(_ratio), uint32(RATIO_BASE - _ratio));
 
-        Allocation[] memory _allocations = splitter.split(_output(_amount));
+        Allocation[] memory _allocations = splitter.split(_amount);
 
         assertEq(_allocations[0].amount + _allocations[1].amount, _amount);
     }
@@ -45,7 +45,7 @@ contract RatioSplitterTest is Fixture {
     function test_ManagerReplacesRecipients() public {
         _set(500_000, 500_000);
 
-        Allocation[] memory _allocations = splitter.split(_output(10));
+        Allocation[] memory _allocations = splitter.split(10);
         assertEq(_allocations[0].amount, 5);
         assertEq(_allocations[1].amount, 5);
     }
@@ -83,10 +83,6 @@ contract RatioSplitterTest is Fixture {
             )
         );
         splitter.setRecipients(new address[](0), new uint32[](0));
-    }
-
-    function _output(uint256 _amount) internal view returns (Plan memory) {
-        return Plan({inToken: tokenB, inAmount: 0, outToken: tokenB, outAmount: _amount, beneficiary: address(0)});
     }
 
     function _set(uint32 _burnRatio, uint32 _feeRatio) internal {

@@ -9,7 +9,7 @@ import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol"
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
-import {IStageAction} from "../interfaces/IStageAction.sol";
+import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget, ICheckpointedBudget} from "../interfaces/IBudget.sol";
 import {IFiller} from "../interfaces/IFiller.sol";
 import {Plan} from "../lib/types.sol";
@@ -25,10 +25,10 @@ import {NATIVE, tokenBalance, isToken} from "../lib/tokens.sol";
 ///      Changing either price term restarts the auction, so a filler cannot take an offer that
 ///      accumulated under the old terms at the new price.
 ///
-///      Native ETH (`address(0)`) works on either side, never both: a native offer is sent as call
+///      Native ETH (`NATIVE`) works on either side, never both: a native offer is sent as call
 ///      value with the callback (no approvals); a native demand is measured on the DAO's ETH balance.
-contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeable {
-    /// @inheritdoc IStageAction
+contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeable {
+    /// @inheritdoc INodeAction
     IBudget public budget;
 
     /// @notice The token the DAO must receive back
@@ -46,7 +46,7 @@ contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeab
     /// @notice Thrown when the budget is address(0)
     error NoBudget();
 
-    /// @notice Thrown when the demanded token is neither native ETH (address(0)) nor a contract
+    /// @notice Thrown when the demanded token is neither native ETH (`NATIVE`) nor a contract
     error InvalidToken();
 
     /// @notice Thrown when the demanded token is the budget's token
@@ -71,7 +71,7 @@ contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeab
 
     /// @param _dao The DAO executing the fills
     /// @param _budget The budget growing the offer; this action restarts it when terms change
-    /// @param _demandedToken The token the DAO must receive back (address(0) for native ETH)
+    /// @param _demandedToken The token the DAO must receive back (`NATIVE` for native ETH)
     /// @param _demandPerFill How much of the demanded token must come back per fill
     /// @param _minDemandedPerOffered The lowest acceptable price, 1e18-scaled
     function initialize(
@@ -92,13 +92,13 @@ contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeab
         _setTerms(_demandPerFill, _minDemandedPerOffered);
     }
 
-    // IStepAction
+    // INodeAction
 
-    /// @inheritdoc IStageAction
+    /// @inheritdoc INodeAction
     /// @dev None in v1
     function preconditions(address, Plan calldata) external view virtual {}
 
-    /// @inheritdoc IStageAction
+    /// @inheritdoc INodeAction
     /// @dev ERC20 offer: approve it to the caller, call it back, clear the approval.
     ///      Native offer: call the caller back with the offer as call value.
     function build(address _caller, bytes calldata _data, Plan calldata _draft)
@@ -134,8 +134,8 @@ contract OpenFillAction is IStageAction, Initializable, DaoAuthorizableUpgradeab
         _actions[2] = Action({to: _in, value: 0, data: abi.encodeCall(IERC20.approve, (_caller, 0))});
     }
 
-    /// @inheritdoc IStageAction
-    /// @dev Reverts the whole step unless the DAO received at least `outAmount`
+    /// @inheritdoc INodeAction
+    /// @dev Reverts the whole trigger unless the DAO received at least `outAmount`
     function postconditions(address, Plan calldata _plan) external view virtual returns (Action[] memory _actions) {
         uint256 _minBalance = tokenBalance(_plan.outToken, address(dao())) + _plan.outAmount;
 

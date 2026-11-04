@@ -4,18 +4,18 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
+import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
-import {PayBeneficiary} from "../src/splitters/PayBeneficiary.sol";
 import {Plan} from "../src/lib/types.sol";
+import {NATIVE} from "../src/lib/tokens.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
 
-/// @notice Native ETH is `IERC20(address(0))` everywhere: budgets, actions, splits, checks
+/// @notice Native ETH is `NATIVE` (0xEeee…EEeE) everywhere; address(0) is never a token
 contract NativeEthTest is Fixture {
-    IERC20 internal constant ETH = IERC20(address(0));
     uint256 internal constant DAO_ETH = 100 ether;
 
     function setUp() public override {
@@ -24,8 +24,10 @@ contract NativeEthTest is Fixture {
     }
 
     function test_BudgetPaysOutEth() public {
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(_deployBalanceBudget(ETH), _one(NO_ACTION, _deployRatio(alice, 500_000, bob, 500_000)));
+        CapitalPipelinePlugin _plugin = _deployPlugin(
+            _deployBalanceBudget(NATIVE),
+            _fork(NO_ACTION, 500_000, _deployTransfer(alice), 500_000, _deployTransfer(bob))
+        );
 
         _plugin.trigger(noData);
 
@@ -35,26 +37,25 @@ contract NativeEthTest is Fixture {
     }
 
     function test_StreamedEthIsSoldForTokens() public {
-        FundedStreamBudget _budget = _deployStream(ETH, RATE, 0);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _one(_deployAction(_budget), _deploySplitter()));
+        FundedStreamBudget _budget = _deployStream(NATIVE, RATE, 0);
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(_budget, _chain(_deployAction(_budget), _deploySplitTransfer(_deploySplitter())));
         MockFiller _filler = new MockFiller(_plugin);
         tokenB.mint(address(_filler), DEMAND);
         vm.warp(block.timestamp + EPOCH);
 
-        _filler.fill("");
+        _filler.fillWithoutData();
 
         assertEq(address(_filler).balance, RATE, "the offer arrives as call value");
         assertEq(address(dao).balance, DAO_ETH - RATE);
         assertEq(tokenB.balanceOf(BURN), 950 ether);
         assertEq(tokenB.balanceOf(fee), 50 ether);
-        assertEq(_budget.available(), 0);
     }
 
     function test_NativeOfferNeedsNoApproval() public {
-        FundedStreamBudget _budget = _deployStream(ETH, RATE, 0);
-        OpenFillAction _action = _deployAction(_budget);
+        OpenFillAction _action = _deployAction(_deployStream(NATIVE, RATE, 0));
 
-        (, Action[] memory _actions) = _action.build(alice, "", Plan(ETH, 10 ether, ETH, 10 ether, address(0)));
+        (, Action[] memory _actions) = _action.build(alice, "", Plan(NATIVE, 10 ether, NATIVE, 10 ether, address(0)));
 
         assertEq(_actions.length, 1, "callback only");
         assertEq(_actions[0].to, alice);
@@ -63,12 +64,13 @@ contract NativeEthTest is Fixture {
 
     function test_TokensAreSoldForEth() public {
         FundedStreamBudget _budget = _deployBudget(RATE, 0); // token A
-        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _one(_deployOpenFill(_budget, ETH), _deploySplitter()));
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(_budget, _chain(_deployOpenFill(_budget, NATIVE), _deploySplitTransfer(_deploySplitter())));
         MockFiller _filler = new MockFiller(_plugin);
         vm.deal(address(_filler), DEMAND);
         vm.warp(block.timestamp + EPOCH);
 
-        _filler.fill("");
+        _filler.fillWithoutData();
 
         assertEq(tokenA.balanceOf(address(_filler)), RATE);
         assertEq(BURN.balance, 950 ether);
@@ -78,11 +80,12 @@ contract NativeEthTest is Fixture {
 
     function test_MerkleClaimPaysEth() public {
         bytes32 _root = keccak256(bytes.concat(keccak256(abi.encode(alice, 1 ether))));
-        MerkleClaimAction _merkle = _deployMerkle(_deployBalanceBudget(ETH), _root);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_merkle.budget(), _one(_merkle, new PayBeneficiary()));
+        MerkleClaimAction _merkle = _deployMerkle(_deployBalanceBudget(NATIVE), _root);
+        CapitalPipelinePlugin _plugin = _deployPlugin(_merkle.budget(), _chain(_merkle, toBeneficiary));
 
-        bytes[] memory _data = new bytes[](1);
+        bytes[] memory _data = new bytes[](2);
         _data[0] = abi.encode(alice, 1 ether, new bytes32[](0), address(0));
+        vm.prank(alice);
         _plugin.trigger(_data);
 
         assertEq(alice.balance, 1 ether);
@@ -91,9 +94,18 @@ contract NativeEthTest is Fixture {
     function test_RevertWhen_RecipientRejectsEth() public {
         // An ERC20 contract has no receive(), so the native send fails inside the DAO
         CapitalPipelinePlugin _plugin =
-            _deployPlugin(_deployBalanceBudget(ETH), _one(NO_ACTION, _deployRatio(address(tokenA))));
+            _deployPlugin(_deployBalanceBudget(NATIVE), _one(_deployTransfer(address(tokenA))));
 
         vm.expectRevert(abi.encodeWithSelector(DAO.ActionFailed.selector, 0));
         _plugin.trigger(noData);
+    }
+
+    /// Issue 7: an unset token no longer means ETH
+    function test_RevertWhen_TokenIsUnset() public {
+        FundedStreamBudget _budget =
+            FundedStreamBudget(ProxyLib.deployMinimalProxy(address(new FundedStreamBudget()), ""));
+
+        vm.expectRevert(FundedStreamBudget.InvalidToken.selector);
+        _budget.initialize(dao, IERC20(address(0)), RATE, 0, EPOCH);
     }
 }

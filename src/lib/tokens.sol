@@ -4,8 +4,9 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 
-/// @dev Native ETH is `IERC20(address(0))` everywhere in the pipeline
-IERC20 constant NATIVE = IERC20(address(0));
+/// @dev Native ETH, by the common 0xEeee…EEeE convention. `address(0)` is never a valid token,
+///      so a parameter left unset reverts instead of silently meaning ETH.
+IERC20 constant NATIVE = IERC20(0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE);
 
 /// @notice `_account`'s balance of `_token`, or of native ETH
 function tokenBalance(IERC20 _token, address _account) view returns (uint256) {
@@ -18,7 +19,7 @@ function transferAction(IERC20 _token, address _to, uint256 _amount) pure return
     return Action({to: address(_token), value: 0, data: abi.encodeCall(IERC20.transfer, (_to, _amount))});
 }
 
-/// @notice True for native ETH or a contract; rejects typos and EOAs
+/// @notice True for native ETH or a contract; rejects address(0), typos and EOAs
 function isToken(IERC20 _token) view returns (bool) {
     return _token == NATIVE || address(_token).code.length != 0;
 }

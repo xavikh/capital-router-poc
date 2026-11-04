@@ -2,13 +2,11 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IStageAction} from "../interfaces/IStageAction.sol";
-import {ISplitter} from "../interfaces/ISplitter.sol";
+import {INodeAction} from "../interfaces/INodeAction.sol";
 
-/// @notice What a stage spends and what it produces. Passed from component to component and,
-///         as the leftover, from stage to stage.
-/// @param beneficiary Who the flowing amount belongs to, once an action sets it (e.g. a Merkle
-///        claim). Carried to later stages; it can't be changed once set.
+/// @notice What a node spends and what it produces
+/// @param beneficiary Who the flowing amount belongs to, once an action sets it (a Merkle claim).
+///        Carried down every branch; it can't be changed once set.
 struct Plan {
     IERC20 inToken;
     uint256 inAmount;
@@ -17,15 +15,20 @@ struct Plan {
     address beneficiary;
 }
 
-/// @notice An amount of a stage's output for one recipient. An allocation to the DAO itself is
-///         kept for the next stage instead of transferred.
+/// @notice An amount for one recipient, returned by splitters
 struct Allocation {
     address recipient;
     uint256 amount;
 }
 
-/// @notice One stage of a flow. Either may be address(0), not both.
-struct Stage {
-    IStageAction action;
-    ISplitter splitter;
+/// @notice One node of a flow tree. Node 0 is the root and receives the budget.
+/// @param action What the node does with its input. May be address(0) only on a branch (2+
+///        children): the node then passes its input to its children unchanged.
+/// @param children Indexes of the child nodes, each greater than this node's index. None makes
+///        the node a leaf, whose action must output nothing.
+/// @param weights One per child when there are 2+ children, summing to RATIO_BASE. Empty otherwise.
+struct Node {
+    INodeAction action;
+    uint32[] children;
+    uint32[] weights;
 }

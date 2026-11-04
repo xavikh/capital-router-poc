@@ -19,7 +19,7 @@ contract BalanceBudget is IBudget, Initializable, DaoAuthorizableUpgradeable {
     /// @inheritdoc IBudget
     IERC20 public token;
 
-    /// @notice Thrown when the token is neither native ETH (address(0)) nor a contract
+    /// @notice Thrown when the token is neither native ETH (`NATIVE`) nor a contract
     error InvalidToken();
 
     /// @custom:oz-upgrades-unsafe-allow constructor

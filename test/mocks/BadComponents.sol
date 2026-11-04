@@ -5,21 +5,24 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
-import {IStageAction} from "../../src/interfaces/IStageAction.sol";
+import {INodeAction} from "../../src/interfaces/INodeAction.sol";
 import {ISplitter} from "../../src/interfaces/ISplitter.sol";
 import {Plan, Allocation} from "../../src/lib/types.sol";
 
-/// @notice An action that misbehaves in one chosen way
-contract BadAction is IStageAction {
+/// @notice A node action that misbehaves in one chosen way. Otherwise it passes its input through.
+contract BadAction is INodeAction {
     enum Mode {
+        Pass, // behaves: passes its whole input on
         Block, // preconditions revert
-        Skip, // returns inAmount 0
-        TargetDao, // returns an action whose target is the DAO
+        Skip, // takes nothing
+        TakeHalf, // takes half its input
         Overspend, // claims 1 wei more than its input
+        TargetDao, // returns an action whose target is the DAO
+        TargetPlugin, // returns an action whose target is the plugin
         Redirect, // sets a different beneficiary than the one already set
         SwapInputToken, // declares a different input token
         Lie, // declares 10 B of output it never produces
-        Drain // declares half the input but transfers all of it away
+        Drain // declares half its input as a leaf but transfers all of it away
     }
 
     address internal constant THIEF = address(0xBEEF);
@@ -48,13 +51,14 @@ contract BadAction is IStageAction {
         if (mode == Mode.Skip) return (_plan, _actions);
 
         _plan = _draft;
+        if (mode == Mode.TakeHalf) (_plan.inAmount, _plan.outAmount) = (_draft.inAmount / 2, _draft.inAmount / 2);
         if (mode == Mode.Overspend) _plan.inAmount += 1;
         if (mode == Mode.Redirect) _plan.beneficiary = THIEF;
         if (mode == Mode.SwapInputToken) _plan.inToken = IERC20(THIEF);
         if (mode == Mode.Lie) (_plan.outToken, _plan.outAmount) = (tokenB, 10 ether);
-        if (mode == Mode.TargetDao) {
+        if (mode == Mode.TargetDao || mode == Mode.TargetPlugin) {
             _actions = new Action[](1);
-            _actions[0] = Action({to: dao, value: 0, data: ""});
+            _actions[0] = Action({to: mode == Mode.TargetDao ? dao : msg.sender, value: 0, data: ""});
         }
         if (mode == Mode.Drain) {
             (_plan.inAmount, _plan.outAmount) = (_draft.inAmount / 2, 0);
@@ -68,15 +72,15 @@ contract BadAction is IStageAction {
     function postconditions(address, Plan calldata) external pure returns (Action[] memory) {}
 }
 
-/// @notice A splitter that allocates 1 wei more than the output
+/// @notice A splitter that allocates 1 wei more than it was given
 contract OverAllocatingSplitter is ISplitter {
-    function split(Plan calldata _plan) external pure returns (Allocation[] memory _allocations) {
+    function split(uint256 _amount) external pure returns (Allocation[] memory _allocations) {
         _allocations = new Allocation[](1);
-        _allocations[0] = Allocation({recipient: address(0xBEEF), amount: _plan.outAmount + 1});
+        _allocations[0] = Allocation({recipient: address(0xBEEF), amount: _amount + 1});
     }
 }
 
-/// @notice Lists the same recipient twice, splitting the output 50/50 between the two entries
+/// @notice Lists the same recipient twice, splitting the amount 50/50 between the two entries
 contract DuplicateRecipientSplitter is ISplitter {
     address public immutable recipient;
 
@@ -84,10 +88,10 @@ contract DuplicateRecipientSplitter is ISplitter {
         recipient = _recipient;
     }
 
-    function split(Plan calldata _plan) external view returns (Allocation[] memory _allocations) {
+    function split(uint256 _amount) external view returns (Allocation[] memory _allocations) {
         _allocations = new Allocation[](2);
-        _allocations[0] = Allocation({recipient: recipient, amount: _plan.outAmount / 2});
-        _allocations[1] = Allocation({recipient: recipient, amount: _plan.outAmount - _plan.outAmount / 2});
+        _allocations[0] = Allocation({recipient: recipient, amount: _amount / 2});
+        _allocations[1] = Allocation({recipient: recipient, amount: _amount - _amount / 2});
     }
 }
 

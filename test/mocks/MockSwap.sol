@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
-import {IStageAction} from "../../src/interfaces/IStageAction.sol";
+import {INodeAction} from "../../src/interfaces/INodeAction.sol";
 import {Plan} from "../../src/lib/types.sol";
 
 /// @notice Pulls `amountIn` and pays `amountIn * rate / 1e18` of `tokenOut` from its own balance
@@ -21,8 +21,8 @@ contract MockExchange {
     }
 }
 
-/// @notice A chainable swap: converts whatever it receives at the exchange's fixed rate
-contract MockSwapAction is IStageAction {
+/// @notice A swap node: converts its whole input at the exchange's fixed rate
+contract MockSwapAction is INodeAction {
     MockExchange public immutable exchange;
     IERC20 public immutable tokenOut;
     address public immutable dao;

@@ -8,24 +8,27 @@ import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol"
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
-import {IStageAction} from "../interfaces/IStageAction.sol";
+import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
 import {Plan} from "../lib/types.sol";
-import {MANAGER_PERMISSION_ID} from "../lib/constants.sol";
+import {MANAGER_PERMISSION_ID, RECORD_CLAIM_PERMISSION_ID} from "../lib/constants.sol";
 
 /// @title MerkleClaimAction
 /// @notice Cumulative Merkle distribution. Each leaf is (account, cumulative amount); an account
 ///         can claim `cumulative − claimed` at any time. A new root raises the cumulative amounts
 ///         for the next round.
-/// @dev Outputs only what the claimed account is owed (not the whole budget) and sets it as the
-///      flow's beneficiary, so later stages can swap it and a `PayBeneficiary` splitter pays it out.
+/// @dev Must be the root of a flow on its budget. Outputs only what the account is owed (not the
+///      whole budget) and sets the flow's beneficiary, so child nodes can swap it before a
+///      `TransferToBeneficiaryAction` pays it out. One claim per trigger.
 ///      Leaves use OpenZeppelin's StandardMerkleTree format: keccak256(bytes.concat(keccak256(abi.encode(account, cumulative)))).
 ///
-///      Stage data: abi.encode(address account, uint256 cumulative, bytes32[] proof, address beneficiary).
-///      Anyone may submit a claim (relayers), and the payout then goes to `account`. Only the account
-///      itself may set a different beneficiary.
-contract MerkleClaimAction is IStageAction, Initializable, DaoAuthorizableUpgradeable {
-    /// @inheritdoc IStageAction
+///      Root data: abi.encode(address account, uint256 cumulative, bytes32[] proof, address beneficiary).
+///      Only the account itself can claim (`caller == account`), so nobody else can pick the data
+///      of the other nodes or front-run a redirect. `beneficiary == 0` pays the account.
+///      Relayed (gasless) claims could be added later with a signature from the account over the
+///      beneficiary and the data of every node.
+contract MerkleClaimAction is INodeAction, Initializable, DaoAuthorizableUpgradeable {
+    /// @inheritdoc INodeAction
     IBudget public budget;
 
     /// @notice The current Merkle root of (account, cumulative amount) leaves
@@ -39,9 +42,9 @@ contract MerkleClaimAction is IStageAction, Initializable, DaoAuthorizableUpgrad
 
     error NoBudget();
     error InvalidProof();
-    error OnlyAccountCanRedirect();
+    error NotTheAccount();
+    error NothingToClaim();
     error InvalidBeneficiary();
-    error OnlyDao();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -56,12 +59,12 @@ contract MerkleClaimAction is IStageAction, Initializable, DaoAuthorizableUpgrad
         _setRoot(_root);
     }
 
-    // IStageAction
+    // INodeAction
 
-    /// @inheritdoc IStageAction
+    /// @inheritdoc INodeAction
     function preconditions(address, Plan calldata) external view virtual {}
 
-    /// @inheritdoc IStageAction
+    /// @inheritdoc INodeAction
     function build(address _caller, bytes calldata _data, Plan calldata _draft)
         external
         view
@@ -71,12 +74,12 @@ contract MerkleClaimAction is IStageAction, Initializable, DaoAuthorizableUpgrad
         (address _account, uint256 _cumulative, bytes32[] memory _proof, address _beneficiary) =
             abi.decode(_data, (address, uint256, bytes32[], address));
 
+        if (_caller != _account) revert NotTheAccount();
         if (!MerkleProof.verify(_proof, root, leaf(_account, _cumulative))) revert InvalidProof();
         if (_beneficiary == address(0)) _beneficiary = _account;
-        if (_beneficiary != _account && _caller != _account) revert OnlyAccountCanRedirect();
         if (_beneficiary == address(dao())) revert InvalidBeneficiary();
 
-        if (_cumulative <= claimed[_account]) return (_plan, _actions); // nothing new: skip
+        if (_cumulative <= claimed[_account]) revert NothingToClaim();
         uint256 _owed = _cumulative - claimed[_account];
 
         _plan = Plan({
@@ -93,16 +96,18 @@ contract MerkleClaimAction is IStageAction, Initializable, DaoAuthorizableUpgrad
         });
     }
 
-    /// @inheritdoc IStageAction
+    /// @inheritdoc INodeAction
     /// @dev None: the plugin's balance checks verify the payout
     function postconditions(address, Plan calldata) external view virtual returns (Action[] memory) {}
 
     // Claim record
 
-    /// @notice Records a claim. Executed by the DAO inside the claim's stage, so it rolls back with it.
-    function recordClaim(address _account, uint256 _cumulative, address _beneficiary) external virtual {
-        if (msg.sender != address(dao())) revert OnlyDao();
-
+    /// @notice Records a claim. Executed by the DAO inside the claim's node, so it rolls back with the flow.
+    function recordClaim(address _account, uint256 _cumulative, address _beneficiary)
+        external
+        virtual
+        auth(RECORD_CLAIM_PERMISSION_ID)
+    {
         emit Claimed(_account, _beneficiary, _cumulative - claimed[_account]);
         claimed[_account] = _cumulative;
     }

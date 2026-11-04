@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IFiller} from "../../src/interfaces/IFiller.sol";
 import {CapitalPipelinePlugin} from "../../src/CapitalPipelinePlugin.sol";
+import {NATIVE} from "../../src/lib/tokens.sol";
 
 /// @notice Triggers the plugin and fills the offer, delivering `demandedAmount + fillDelta`
 contract MockFiller is IFiller {
@@ -33,11 +34,12 @@ contract MockFiller is IFiller {
         reenter = _reenter;
     }
 
-    /// @notice This contract becomes the trigger caller, so the DAO calls it back
+    /// @notice This contract becomes the trigger caller, so the DAO calls it back. `_data` goes to
+    ///         the root (the OpenFill node); the other nodes get none.
     function fill(bytes memory _data) external {
-        bytes[] memory _perStep = new bytes[](1);
-        _perStep[0] = _data;
-        plugin.trigger(_perStep);
+        bytes[] memory _perNode = new bytes[](plugin.nodes().length);
+        _perNode[0] = _data;
+        plugin.trigger(_perNode);
     }
 
     /// @notice Triggers with no data at all, which works for flows of any length
@@ -60,12 +62,12 @@ contract MockFiller is IFiller {
         }
 
         // A native offer already arrived as msg.value; an ERC20 offer is pulled
-        if (address(_offeredToken) != address(0)) {
+        if (_offeredToken != NATIVE) {
             _offeredToken.transferFrom(msg.sender, address(this), _offeredAmount);
         }
 
         uint256 _amount = uint256(int256(_demandedAmount) + fillDelta);
-        if (address(_demandedToken) == address(0)) {
+        if (_demandedToken == NATIVE) {
             (bool _ok,) = msg.sender.call{value: _amount}("");
             require(_ok, "MockFiller: ETH send failed");
         } else {

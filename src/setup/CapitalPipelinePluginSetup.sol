@@ -11,8 +11,10 @@ import {CapitalPipelinePlugin} from "../CapitalPipelinePlugin.sol";
 import {FundedStreamBudget} from "../budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../actions/OpenFillAction.sol";
 import {RatioSplitter} from "../splitters/RatioSplitter.sol";
+import {SplitTransferAction} from "../actions/SplitTransferAction.sol";
+import {ISplitter} from "../interfaces/ISplitter.sol";
 import {ICheckpointedBudget} from "../interfaces/IBudget.sol";
-import {Stage} from "../lib/types.sol";
+import {Node} from "../lib/types.sol";
 import {
     TRIGGER_PERMISSION_ID,
     CONFIGURE_PERMISSION_ID,
@@ -21,8 +23,8 @@ import {
 } from "../lib/constants.sol";
 
 /// @title CapitalPipelinePluginSetup
-/// @notice Installs a plugin with a swap-and-split flow: FundedStreamBudget, then one stage of
-///         OpenFillAction → RatioSplitter. Deploys every component as a clone bound to the installing DAO.
+/// @notice Installs a plugin with a swap-and-split flow: FundedStreamBudget feeding a two-node tree,
+///         OpenFillAction → SplitTransferAction(RatioSplitter). Deploys every component as a clone.
 contract CapitalPipelinePluginSetup is PluginSetup {
     /// @notice Installation parameters
     struct InstallParams {
@@ -47,15 +49,17 @@ contract CapitalPipelinePluginSetup is PluginSetup {
     address public immutable budgetImplementation;
     address public immutable actionImplementation;
     address public immutable splitterImplementation;
+    address public immutable splitTransferImplementation;
 
     constructor() PluginSetup(address(new CapitalPipelinePlugin())) {
         budgetImplementation = address(new FundedStreamBudget());
         actionImplementation = address(new OpenFillAction());
         splitterImplementation = address(new RatioSplitter());
+        splitTransferImplementation = address(new SplitTransferAction());
     }
 
     /// @inheritdoc IPluginSetup
-    /// @dev `_data` is `abi.encode(InstallParams)`. Helpers: [budget, action, splitter].
+    /// @dev `_data` is `abi.encode(InstallParams)`. Helpers: [budget, action, splitter, splitTransfer].
     function prepareInstallation(address _dao, bytes calldata _data)
         external
         returns (address plugin, PreparedSetupData memory preparedSetupData)
@@ -64,12 +68,15 @@ contract CapitalPipelinePluginSetup is PluginSetup {
 
         address[] memory _helpers = _deployComponents(IDAO(_dao), _params);
 
-        Stage[] memory _stages = new Stage[](1);
-        _stages[0] = Stage({action: OpenFillAction(_helpers[1]), splitter: RatioSplitter(_helpers[2])});
+        Node[] memory _nodes = new Node[](2);
+        _nodes[0].action = OpenFillAction(_helpers[1]);
+        _nodes[0].children = new uint32[](1);
+        _nodes[0].children[0] = 1;
+        _nodes[1].action = SplitTransferAction(_helpers[3]);
 
         plugin = ProxyLib.deployMinimalProxy(
             implementation(),
-            abi.encodeCall(CapitalPipelinePlugin.initialize, (IDAO(_dao), FundedStreamBudget(_helpers[0]), _stages))
+            abi.encodeCall(CapitalPipelinePlugin.initialize, (IDAO(_dao), FundedStreamBudget(_helpers[0]), _nodes))
         );
 
         preparedSetupData.helpers = _helpers;
@@ -91,7 +98,7 @@ contract CapitalPipelinePluginSetup is PluginSetup {
     // Internal
 
     function _deployComponents(IDAO _dao, InstallParams memory _params) internal returns (address[] memory _helpers) {
-        _helpers = new address[](3);
+        _helpers = new address[](4);
         _helpers[0] = ProxyLib.deployMinimalProxy(
             budgetImplementation,
             abi.encodeCall(
@@ -114,6 +121,9 @@ contract CapitalPipelinePluginSetup is PluginSetup {
         );
         _helpers[2] = ProxyLib.deployMinimalProxy(
             splitterImplementation, abi.encodeCall(RatioSplitter.initialize, (_dao, _params.recipients, _params.ratios))
+        );
+        _helpers[3] = ProxyLib.deployMinimalProxy(
+            splitTransferImplementation, abi.encodeCall(SplitTransferAction.initialize, (ISplitter(_helpers[2])))
         );
     }
 

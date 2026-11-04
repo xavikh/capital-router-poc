@@ -7,7 +7,7 @@ import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {ISplitter} from "../interfaces/ISplitter.sol";
-import {Allocation, Plan} from "../lib/types.sol";
+import {Allocation} from "../lib/types.sol";
 import {MANAGER_PERMISSION_ID, RATIO_BASE} from "../lib/constants.sol";
 
 /// @title RatioSplitter
@@ -39,8 +39,7 @@ contract RatioSplitter is ISplitter, Initializable, DaoAuthorizableUpgradeable {
     }
 
     /// @inheritdoc ISplitter
-    function split(Plan calldata _plan) external view virtual returns (Allocation[] memory _allocations) {
-        uint256 _amount = _plan.outAmount;
+    function split(uint256 _amount) external view virtual returns (Allocation[] memory _allocations) {
         uint256 _len = _recipients.length;
         _allocations = new Allocation[](_len);
 
