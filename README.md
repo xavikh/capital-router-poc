@@ -26,7 +26,6 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/actions/MerkleClaimAction.sol` | Cumulative Merkle claims with a redirectable beneficiary |
 | `src/splitters/RatioSplitter.sol` | Fixed-ratio split; a share to the DAO carries to the next stage |
 | `src/splitters/PayBeneficiary.sol` | Pays a stage's output to the flow's beneficiary |
-| `src/periphery/TriggerBatch.sol` | Triggers several plugins in one transaction, with allowed failures |
 | `src/setup/CapitalPipelinePluginSetup.sol` | Installs the swap-and-split flow |
 
 ## Permissions
