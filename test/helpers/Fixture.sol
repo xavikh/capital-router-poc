@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
+import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../../src/lib/constants.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
@@ -53,5 +54,20 @@ abstract contract Fixture is Test {
         );
         dao.grant(address(_budget), manager, MANAGER_PERMISSION_ID);
         dao.grant(address(_budget), address(dao), CHECKPOINT_PERMISSION_ID);
+    }
+
+    /// @dev 95% to the burn address, 5% to the fee address
+    function _deploySplitter() internal returns (RatioSplitter _splitter) {
+        address[] memory _recipients = new address[](2);
+        (_recipients[0], _recipients[1]) = (BURN, fee);
+        uint32[] memory _ratios = new uint32[](2);
+        (_ratios[0], _ratios[1]) = (950_000, 50_000);
+
+        _splitter = RatioSplitter(
+            ProxyLib.deployMinimalProxy(
+                address(new RatioSplitter()), abi.encodeCall(RatioSplitter.initialize, (dao, _recipients, _ratios))
+            )
+        );
+        dao.grant(address(_splitter), manager, MANAGER_PERMISSION_ID);
     }
 }
