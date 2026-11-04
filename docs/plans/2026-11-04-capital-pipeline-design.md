@@ -57,9 +57,15 @@ interface IPrecondition {
 }
 
 interface IStepAction {
-    /// Caps inAmount, sets outToken/outAmount, returns its actions including its own safety checks
+    /// The checks this action needs before running. Always called by the plugin. Revert = blocked.
+    function preconditions(address caller, Plan calldata draft) external view;
+
+    /// Caps inAmount, sets outToken/outAmount, returns the actions that do the work
     function build(address caller, bytes calldata data, Plan calldata draft)
         external view returns (Plan memory plan, Action[] memory actions);
+
+    /// The checks that make this action safe. Always called by the plugin, so they can't be left out.
+    function postconditions(address caller, Plan calldata plan) external view returns (Action[] memory);
 }
 
 interface IPostcondition {
@@ -75,13 +81,15 @@ interface ISplitter {
 
 ```
 trigger(bytes[] data)                                    // one entry per step, or empty
+  if paused → revert Paused()
   for each step i:
-    if paused → revert StepPaused(i)
     draft = { A, budget.available(), A, budget.available() }
-    pre.check(caller, draft)
+    action.preconditions(caller, draft)                 // always called when an action is set
+    pre.check(caller, draft)                            // optional, step-level extras
     (plan, acts) = action.build(caller, data[i], draft)  // no action → (draft, [])
     if plan.inAmount == 0 → skip step (no checkpoint)
-    acts += post.actions(caller, plan)
+    acts += action.postconditions(caller, plan)         // always called when an action is set
+    acts += post.actions(caller, plan)                  // optional, step-level extras
     acts += transfers(plan.outToken, splitter.split(plan.outAmount))
     acts += budget.commitActions(plan)
     dao.execute(executionId(i), acts, 0)
@@ -93,10 +101,10 @@ trigger(bytes[] data)                                    // one entry per step, 
 ### v1 flow: action list for one fill
 
 ```
-1. A.approve(filler, in)
-2. filler.fillOffer(A, in, B, out, data)
-3. swapAction.assertReceived(B, before + out)
-4. A.approve(filler, 0)
+1. A.approve(filler, in)                          ┐
+2. filler.fillOffer(A, in, B, out, data)          ├ action.build
+3. A.approve(filler, 0)                           ┘
+4. swapAction.assertReceived(B, before + out)     ← action.postconditions
 5. B.transfer(0x…dEaD, 95% of out)
 6. B.transfer(fee, 5% of out + rounding remainder → largest share)
 7. budget.writeCheckpoint()
@@ -106,7 +114,7 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 ## Rules
 
-1. **An action carries its own safety checks.** OpenFill's "DAO received ≥ out" is part of the action, not the optional postcondition slot. Otherwise a step installed without a postcondition hands the budget to the filler for nothing.
+1. **An action implements its own preconditions and postconditions.** OpenFill's "DAO received ≥ out" lives in `OpenFillAction.postconditions`, and the plugin calls both hooks on every step with an action. If the check were a separate address in the step's postcondition slot, a step installed with that slot empty would hand the budget to the filler for nothing. The step-level precondition and postcondition slots are only for extra checks on top. Budget and splitter stay separate from the action.
 2. **The budget always appends its own commit.** Steps can't leave it out. Without `writeCheckpoint`, a filler could fill again in the same block.
 3. **Planning is view-only.** Every state change is a DAO action inside the single `execute`. No `PREPARE_PERMISSION_ID`, no self-call wrapper. Previews are a plain `eth_call`.
 4. **Actions declare their output at plan time.** OpenFill: the demand. No action: output = input. Actions whose output is only known after execution (CowSwap) cannot be combined with a splitter.
@@ -116,9 +124,9 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 ### `CapitalPipelinePlugin` (PluginCloneable)
 
-- Storage: `Step[] steps` where `Step = { IBudget budget; IPrecondition pre; IStepAction action; IPostcondition post; ISplitter splitter; bool paused; }`.
+- Storage: `Step[] steps` where `Step = { IBudget budget; IPrecondition pre; IStepAction action; IPostcondition post; ISplitter splitter; }`, plus one `bool paused` for the whole plugin.
 - `trigger(bytes[] data)`: `auth(TRIGGER_PERMISSION_ID)` (granted to `ANY_ADDR` at install, so OSx conditions can gate it later), plugin-level reentrancy guard.
-- `setSteps(Step[])`, `setPaused(i, bool)`: `auth(MANAGER_PERMISSION_ID)`.
+- `setSteps(Step[])`, `setPaused(bool)`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, remove it with `setSteps`.
 - `setSteps` rejects a step whose swap action is bound to a different budget than the step's budget.
 
 ### `FundedStreamBudget` (adapted)
@@ -134,7 +142,9 @@ Keeps the existing curve: `min(baseAmount + rate × elapsed, lastSeenBalance, va
 ### `OpenFillAction`
 
 - Bound at init to: its budget, the output token B, `demandPerFill`, `minDemandedPerOffered`.
-- `build`: `in = min(draft.inAmount, maxOffered())`, `out = demandPerFill`, snapshots the DAO's B balance, returns actions 1–4 above.
+- `preconditions`: none in v1 (no-op).
+- `build`: `in = min(draft.inAmount, maxOffered())`, `out = demandPerFill`, returns actions 1–3 above.
+- `postconditions`: snapshots the DAO's B balance, returns action 4. A future swap action (e.g. Uniswap) implements the same function.
 - `maxOffered() = demandPerFill × 1e18 / minDemandedPerOffered` (same scaling and init checks as capital-router's `AuctionFillPolicy`).
 - `assertReceived(B, minBalance)`: view, reverts if the DAO holds less.
 - Setters `setDemandPerFill`, `setMinDemandedPerOffered`: `auth(MANAGER_PERMISSION_ID)`, then call `budget.writeCheckpoint()` to restart the auction. Without the restart, lowering the demand or the minimum price lets a filler take the accumulated offer at the new price in the same block.
@@ -160,7 +170,7 @@ Deploys the plugin and components as clones and grants:
 ## Failure handling
 
 - Any revert in any slot reverts the whole `trigger`. No failsafe map in v1 (one step); add it when multi-step flows exist.
-- Paused step: reverts with `StepPaused(i)`.
+- Paused plugin: `trigger` reverts with `Paused()`.
 - Empty pot (`plan.inAmount == 0`): the step is skipped without a checkpoint; `trigger` succeeds.
 - `data` must be empty or have one entry per step, otherwise revert.
 - Reentrancy: the filler runs arbitrary code inside `dao.execute` before the checkpoint. The DAO's own guard blocks a nested `execute`; the plugin guard on `trigger` keeps that protection local.
