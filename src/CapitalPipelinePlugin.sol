@@ -16,7 +16,7 @@ import {TRIGGER_PERMISSION_ID, CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} f
 ///         postconditions) → splitter → budget commit, executed by the DAO in one `execute`.
 /// @dev Planning is view-only; every state change is a DAO action. What the plugin enforces for
 ///      every step, whatever its components do: all hooks run in order, the input never exceeds
-///      the budget, and allocations never exceed the output.
+///      the budget, allocations never exceed the output, and no action targets the DAO itself.
 contract CapitalPipelinePlugin is PluginCloneable {
     Step[] internal _steps;
 
@@ -26,6 +26,9 @@ contract CapitalPipelinePlugin is PluginCloneable {
     /// @dev Makes every execution ID unique
     uint256 internal _nonce;
 
+    /// @dev Reentrancy lock. Transient, so it needs no initialization on clones.
+    bool internal transient _entered;
+
     event StepsUpdated(Step[] steps);
     event PausedSet(bool paused);
     event StepExecuted(uint256 indexed stepIndex, address indexed caller, bytes32 executionId, Plan plan);
@@ -34,10 +37,12 @@ contract CapitalPipelinePlugin is PluginCloneable {
     error NoBudget(uint256 stepIndex);
     error BudgetMismatch(uint256 stepIndex);
     error Paused();
+    error Reentrant();
     error DataLengthMismatch(uint256 expected, uint256 actual);
     error InAmountExceedsBudget(uint256 stepIndex, uint256 inAmount, uint256 available);
     error AllocationExceedsOutput(uint256 stepIndex, uint256 allocated, uint256 outAmount);
     error InvalidOutToken(uint256 stepIndex);
+    error ActionTargetsDao(uint256 stepIndex, uint256 actionIndex);
 
     function initialize(IDAO _dao, Step[] calldata _newSteps) external initializer {
         __PluginCloneable_init(_dao);
@@ -47,6 +52,8 @@ contract CapitalPipelinePlugin is PluginCloneable {
     /// @notice Runs every step in order
     /// @param _data Empty, or one entry per step (passed to that step's action)
     function trigger(bytes[] calldata _data) external auth(TRIGGER_PERMISSION_ID) {
+        if (_entered) revert Reentrant();
+        _entered = true;
         if (paused) revert Paused();
 
         uint256 _len = _steps.length;
@@ -56,6 +63,7 @@ contract CapitalPipelinePlugin is PluginCloneable {
         for (uint256 i; i < _len; ++i) {
             _runStep(i, _data.length == 0 ? msg.data[0:0] : _data[i], _callNonce);
         }
+        _entered = false;
     }
 
     /// @notice Replaces all steps. DAO only: a step can return arbitrary DAO actions.
@@ -80,6 +88,7 @@ contract CapitalPipelinePlugin is PluginCloneable {
 
         (Plan memory _plan, Action[] memory _actions) = _planStep(_index, _step, _data);
         if (_plan.inAmount == 0) return;
+        _rejectDaoTargets(_index, _actions);
 
         bytes32 _executionId = keccak256(abi.encode(address(this), _callNonce, _index));
         IExecutor(address(dao())).execute(_executionId, _actions, 0);
@@ -142,6 +151,13 @@ contract CapitalPipelinePlugin is PluginCloneable {
                 value: 0,
                 data: abi.encodeCall(IERC20.transfer, (_allocations[i].recipient, _allocations[i].amount))
             });
+        }
+    }
+
+    function _rejectDaoTargets(uint256 _index, Action[] memory _actions) internal view {
+        address _dao = address(dao());
+        for (uint256 i; i < _actions.length; ++i) {
+            if (_actions[i].to == _dao) revert ActionTargetsDao(_index, i);
         }
     }
 

@@ -175,6 +175,24 @@ contract CapitalPipelinePluginTest is Fixture {
         _plugin.trigger(new bytes[](0));
     }
 
+    // Guards
+
+    function test_RevertWhen_AnActionTargetsTheDao() public {
+        CapitalPipelinePlugin _plugin = _deployPlugin(_steps(budget, _bad(BadAction.Mode.TargetDao), splitter));
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.ActionTargetsDao.selector, 0, 0));
+        _plugin.trigger(new bytes[](0));
+    }
+
+    function test_FillerCannotReenterTrigger() public {
+        filler.setReenter(true);
+
+        filler.fill("");
+
+        assertEq(filler.reentryError(), abi.encodeWithSelector(CapitalPipelinePlugin.Reentrant.selector));
+        assertEq(tokenB.balanceOf(BURN), 950 ether, "the outer fill still completes");
+    }
+
     function _bad(BadAction.Mode _mode) internal returns (IStepAction) {
         return new BadAction(_mode, address(dao));
     }
