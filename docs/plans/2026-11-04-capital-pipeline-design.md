@@ -85,6 +85,7 @@ trigger(bytes[] data)                                    // one entry per step, 
     acts += action.postconditions(caller, plan)         // skipped when there is no action
     acts += transfers(plan.outToken, splitter.split(plan.outAmount))
     acts += budget.commitActions(plan)
+    if any acts[j].to == dao → revert ActionTargetsDao(i, j)
     dao.execute(executionId(i), acts, 0)
     emit StepExecuted(i, caller, plan)
 ```
@@ -119,7 +120,9 @@ One `dao.execute`: if the filler under-delivers, everything reverts.
 
 - Storage: `Step[] steps` where `Step = { IBudget budget; IStepAction action; ISplitter splitter; }`, plus one `bool paused` for the whole plugin.
 - `trigger(bytes[] data)`: `auth(TRIGGER_PERMISSION_ID)` (granted to `ANY_ADDR` at install, so OSx conditions can gate it later), plugin-level reentrancy guard.
-- `setSteps(Step[])`, `setPaused(bool)`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, remove it with `setSteps`.
+- `setSteps(Step[])`: `auth(CONFIGURE_PERMISSION_ID)`, held by the DAO only. An action can return arbitrary DAO actions, so installing a step is equivalent to executing from the treasury and stays a governance decision.
+- `setPaused(bool)`: `auth(MANAGER_PERMISSION_ID)`. Pausing stops every step; to disable a single step, the DAO removes it with `setSteps`.
+- Every assembled action targeting the DAO itself is rejected, so no step can grant permissions, upgrade, or reconfigure the DAO.
 - `setSteps` rejects a step whose swap action is bound to a different budget than the step's budget.
 
 ### `FundedStreamBudget` (adapted)
@@ -157,6 +160,7 @@ Deploys the plugin and components as clones and grants:
 |---|---|---|
 | `EXECUTE_PERMISSION_ID` | DAO | plugin |
 | `TRIGGER_PERMISSION_ID` | plugin | `ANY_ADDR` |
+| `CONFIGURE_PERMISSION_ID` | plugin | DAO |
 | `MANAGER_PERMISSION_ID` | plugin, budget, action, splitter | manager (install param) |
 | `CHECKPOINT_PERMISSION_ID` | budget | DAO, swap action |
 
@@ -166,6 +170,7 @@ Deploys the plugin and components as clones and grants:
 - Paused plugin: `trigger` reverts with `Paused()`.
 - Empty pot (`plan.inAmount == 0`): the step is skipped without a checkpoint; `trigger` succeeds.
 - `data` must be empty or have one entry per step, otherwise revert.
+- An assembled action targeting the DAO: `trigger` reverts with `ActionTargetsDao(step, index)`.
 - Reentrancy: the filler runs arbitrary code inside `dao.execute` before the checkpoint. The DAO's own guard blocks a nested `execute`; the plugin guard on `trigger` keeps that protection local.
 
 ## Constraints and known limits
@@ -174,13 +179,13 @@ Deploys the plugin and components as clones and grants:
 - No fee-on-transfer or rebasing tokens: `assertReceived` would revert or drift.
 - Burn is a transfer to `0x…dEaD`: `totalSupply` does not drop. Matters if B is a governance token with supply-based quorum.
 - `FundedStreamBudget` freezes after deposits of A until someone calls `sync()`. Run a keeper or add a `sync()` action wherever revenue enters the DAO.
-- Manager power is spend power: a manager can lower the minimum price or redirect the split. Accepted for v1.
+- Manager power is spend power within the installed steps: a manager can lower the minimum price or redirect the split. Accepted for v1. Installing or removing steps stays with the DAO.
 - 256 actions per `execute`: 7 for the v1 flow, so the splitter can hold up to ~250 recipients.
 
 ## Testing (Foundry)
 
 1. **Happy path**: mock filler delivers; the DAO's A drops by `in`, `0x…dEaD` and fee receive exactly 95% / 5% of `out`, checkpoint written.
-2. **Bad fillers**: under-delivery reverts everything (no transfers, no checkpoint); a filler that re-enters `trigger` from `fillOffer` fails; a second fill in the same block gets zero.
+2. **Bad fillers and bad steps**: under-delivery reverts everything (no transfers, no checkpoint); a filler that re-enters `trigger` from `fillOffer` fails; a second fill in the same block gets zero; a step returning an action that targets the DAO reverts with `ActionTargetsDao`; the manager cannot call `setSteps`.
 3. **Tweaks don't jump**: after rate or max changes, `available()` is unchanged in the same block; after price-term changes, `available()` is zero.
 4. **Splitter fuzz**: allocations sum to exactly `amount` for any amount and valid ratio set.
 5. **Invariant**: the DAO's pre-existing B balance never decreases across any sequence of triggers and tweaks.
