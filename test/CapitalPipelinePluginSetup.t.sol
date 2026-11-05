@@ -2,32 +2,43 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    DaoAuthorizableUpgradeable
+} from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {IPluginSetup} from "@aragon/osx-commons-contracts/src/plugin/setup/IPluginSetup.sol";
 import {PermissionLib} from "@aragon/osx-commons-contracts/src/permission/PermissionLib.sol";
 import {CapitalPipelinePluginSetup} from "../src/setup/CapitalPipelinePluginSetup.sol";
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
+import {ComponentRegistry} from "../src/registry/ComponentRegistry.sol";
+import {INodeAction} from "../src/interfaces/INodeAction.sol";
 import {
     TRIGGER_PERMISSION_ID,
     CONFIGURE_PERMISSION_ID,
     MANAGER_PERMISSION_ID,
     CHECKPOINT_PERMISSION_ID
 } from "../src/lib/constants.sol";
+import {DAO_REF, PLUGIN_REF, ref} from "../src/lib/placeholders.sol";
+import {Deploy} from "../script/Deploy.s.sol";
+import {Recipes} from "../script/Recipes.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
 
 contract CapitalPipelinePluginSetupTest is Fixture {
+    ComponentRegistry internal registry;
     CapitalPipelinePluginSetup internal setup;
 
     function setUp() public override {
         super.setUp();
-        setup = new CapitalPipelinePluginSetup();
+        (registry, setup) = new Deploy().deploy(dao);
     }
 
-    function test_InstalledPluginFillsAndSplits() public {
-        (CapitalPipelinePlugin _plugin,) = _install();
-        MockFiller _filler = new MockFiller(_plugin);
-        tokenB.mint(address(_filler), 1_000_000 ether);
-        vm.warp(block.timestamp + EPOCH);
+    // =========================================================================================
+    // Recipes
+    // =========================================================================================
+
+    function test_SwapAndSplitFillsAndSplits() public {
+        (CapitalPipelinePlugin _plugin,) = _install(_swapAndSplit());
+        MockFiller _filler = _newFiller(_plugin);
 
         _filler.fill("");
 
@@ -36,53 +47,206 @@ contract CapitalPipelinePluginSetupTest is Fixture {
         assertEq(tokenB.balanceOf(address(dao)), DAO_B);
     }
 
-    function test_GrantsTheDesignedPermissions() public {
-        (CapitalPipelinePlugin _plugin, address[] memory _helpers) = _install();
+    function test_BuybackBurnsAndPaysTheFee() public {
+        (CapitalPipelinePlugin _plugin,) = _install(Recipes.buyback(manager, _stream(), _swap(), fee, 50_000));
+        MockFiller _filler = _newFiller(_plugin);
+        uint256 _supply = tokenB.totalSupply();
+
+        _filler.fill("");
+
+        assertEq(tokenB.totalSupply(), _supply - 950 ether);
+        assertEq(tokenB.balanceOf(fee), 50 ether);
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B);
+    }
+
+    function test_MerkleClaimPaysTheAccount() public {
+        bytes32 _aliceLeaf = _leafHash(alice, 10 ether);
+        bytes32 _bobLeaf = _leafHash(bob, 30 ether);
+        (CapitalPipelinePlugin _plugin,) =
+            _install(Recipes.merkleClaim(manager, IERC20(tokenA), _hashPair(_aliceLeaf, _bobLeaf)));
+
+        bytes32[] memory _proof = new bytes32[](1);
+        _proof[0] = _bobLeaf;
+        bytes[] memory _data = new bytes[](2);
+        _data[0] = abi.encode(alice, 10 ether, _proof, address(0));
+
+        vm.prank(alice);
+        _plugin.trigger(_data);
+
+        assertEq(tokenA.balanceOf(alice), 10 ether);
+    }
+
+    function test_PayrollPaysEachRecipient() public {
+        (CapitalPipelinePlugin _plugin,) = _install(Recipes.payroll(manager, _stream(), _pair(alice, bob), _ratios()));
+        vm.warp(block.timestamp + EPOCH);
+
+        _plugin.trigger(noData);
+
+        assertEq(tokenA.balanceOf(alice), 9.5 ether);
+        assertEq(tokenA.balanceOf(bob), 0.5 ether);
+    }
+
+    // =========================================================================================
+    // Components and permissions
+    // =========================================================================================
+
+    function test_EveryComponentIsAFreshCloneOfTheDao() public {
+        (, address[] memory _first) = _install(_swapAndSplit());
+        (, address[] memory _second) = _install(_swapAndSplit());
+
+        for (uint256 i; i < _first.length; ++i) {
+            assertTrue(_first[i] != _second[i], "a new clone per install");
+            assertEq(address(DaoAuthorizableUpgradeable(_first[i]).dao()), address(dao));
+        }
+        assertTrue(_first[1] != registry.implementation(Recipes.OPEN_FILL), "never the implementation");
+    }
+
+    function test_GrantsTheRecipePermissions() public {
+        (CapitalPipelinePlugin _plugin, address[] memory _helpers) = _install(_swapAndSplit());
 
         _assertPermissions(address(_plugin), _helpers, true);
         assertFalse(
-            dao.hasPermission(address(_plugin), manager, CONFIGURE_PERMISSION_ID, ""), "manager can't set steps"
+            dao.hasPermission(address(_plugin), manager, CONFIGURE_PERMISSION_ID, ""), "manager can't set the flow"
         );
     }
 
     function test_UninstallRevokesEverything() public {
-        (CapitalPipelinePlugin _plugin, address[] memory _helpers) = _install();
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        (CapitalPipelinePlugin _plugin, address[] memory _helpers) = _install(_params);
 
-        PermissionLib.MultiTargetPermission[] memory _revokes = setup.prepareUninstallation(
-            address(dao),
-            IPluginSetup.SetupPayload({plugin: address(_plugin), currentHelpers: _helpers, data: abi.encode(manager)})
-        );
-        dao.applyMultiTargetPermissions(_revokes);
+        dao.applyMultiTargetPermissions(_prepareUninstall(_plugin, _helpers, _params.grants));
 
         _assertPermissions(address(_plugin), _helpers, false);
     }
 
-    function _install() internal returns (CapitalPipelinePlugin _plugin, address[] memory _helpers) {
-        address[] memory _recipients = new address[](2);
-        (_recipients[0], _recipients[1]) = (BURN, fee);
-        uint32[] memory _ratios = new uint32[](2);
-        (_ratios[0], _ratios[1]) = (950_000, 50_000);
+    function test_RevertWhen_UninstallGrantsDiffer() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        (CapitalPipelinePlugin _plugin, address[] memory _helpers) = _install(_params);
+        CapitalPipelinePluginSetup.Grant[] memory _fewer = new CapitalPipelinePluginSetup.Grant[](1);
+        _fewer[0] = _params.grants[0];
 
-        bytes memory _params = abi.encode(
-            CapitalPipelinePluginSetup.InstallParams({
-                manager: manager,
-                offeredToken: IERC20(tokenA),
-                amountPerEpoch: RATE,
-                maxBudget: 0,
-                epochInterval: EPOCH,
-                demandedToken: IERC20(tokenB),
-                demandPerFill: DEMAND,
-                minDemandedPerOffered: MIN_PRICE,
-                recipients: _recipients,
-                ratios: _ratios
-            })
+        vm.expectRevert(CapitalPipelinePluginSetup.GrantsMismatch.selector);
+        _prepareUninstall(_plugin, _helpers, _fewer);
+    }
+
+    // =========================================================================================
+    // Rejected recipes
+    // =========================================================================================
+
+    function test_RevertWhen_AComponentIsNotRegistered() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        _params.components[0].id = "Unknown@1";
+
+        _expectInstallRevert(
+            _params, abi.encodeWithSelector(ComponentRegistry.UnknownComponent.selector, bytes32("Unknown@1"))
         );
+    }
 
+    function test_RevertWhen_AReferenceIsUnknown() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        _params.nodes[1].action = INodeAction(ref(9));
+
+        _expectInstallRevert(_params, abi.encodeWithSelector(CapitalPipelinePluginSetup.UnknownReference.selector, 9));
+    }
+
+    function test_RevertWhen_AGrantTargetsTheDao() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        _params.grants[0] = CapitalPipelinePluginSetup.Grant(DAO_REF, manager, keccak256("ROOT_PERMISSION"));
+
+        _expectInstallRevert(
+            _params, abi.encodeWithSelector(CapitalPipelinePluginSetup.GrantOutsideInstallation.selector, DAO_REF)
+        );
+    }
+
+    function test_RevertWhen_AGrantTargetsAnOutsideContract() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        _params.grants[0] = CapitalPipelinePluginSetup.Grant(address(tokenA), manager, MANAGER_PERMISSION_ID);
+
+        _expectInstallRevert(
+            _params,
+            abi.encodeWithSelector(CapitalPipelinePluginSetup.GrantOutsideInstallation.selector, address(tokenA))
+        );
+    }
+
+    function test_RevertWhen_AGrantGivesConfigure() public {
+        CapitalPipelinePluginSetup.InstallParams memory _params = _swapAndSplit();
+        _params.grants[1] = CapitalPipelinePluginSetup.Grant(PLUGIN_REF, manager, CONFIGURE_PERMISSION_ID);
+
+        _expectInstallRevert(
+            _params,
+            abi.encodeWithSelector(CapitalPipelinePluginSetup.ReservedPermission.selector, CONFIGURE_PERMISSION_ID)
+        );
+    }
+
+    // =========================================================================================
+    // Helpers
+    // =========================================================================================
+
+    function _install(CapitalPipelinePluginSetup.InstallParams memory _params)
+        internal
+        returns (CapitalPipelinePlugin _plugin, address[] memory _helpers)
+    {
         (address _pluginAddress, IPluginSetup.PreparedSetupData memory _prepared) =
-            setup.prepareInstallation(address(dao), _params);
+            setup.prepareInstallation(address(dao), abi.encode(_params));
         dao.applyMultiTargetPermissions(_prepared.permissions);
 
         return (CapitalPipelinePlugin(_pluginAddress), _prepared.helpers);
+    }
+
+    function _expectInstallRevert(CapitalPipelinePluginSetup.InstallParams memory _params, bytes memory _error)
+        internal
+    {
+        bytes memory _data = abi.encode(_params);
+        vm.expectRevert(_error);
+        setup.prepareInstallation(address(dao), _data);
+    }
+
+    function _prepareUninstall(
+        CapitalPipelinePlugin _plugin,
+        address[] memory _helpers,
+        CapitalPipelinePluginSetup.Grant[] memory _grants
+    ) internal view returns (PermissionLib.MultiTargetPermission[] memory) {
+        return setup.prepareUninstallation(
+            address(dao),
+            IPluginSetup.SetupPayload({plugin: address(_plugin), currentHelpers: _helpers, data: abi.encode(_grants)})
+        );
+    }
+
+    /// @dev Swap 10 A for 1,000 B, then pay 95% to the burn address and 5% to the fee address
+    function _swapAndSplit() internal view returns (CapitalPipelinePluginSetup.InstallParams memory) {
+        return Recipes.swapAndSplit(manager, _stream(), _swap(), _pair(BURN, fee), _ratios());
+    }
+
+    function _stream() internal view returns (Recipes.Stream memory) {
+        return Recipes.Stream({token: IERC20(tokenA), amountPerEpoch: RATE, maxBudget: 0, epochInterval: EPOCH});
+    }
+
+    function _swap() internal view returns (Recipes.Swap memory) {
+        return Recipes.Swap({demandedToken: IERC20(tokenB), demandPerFill: DEMAND, minDemandedPerOffered: MIN_PRICE});
+    }
+
+    function _pair(address _a, address _b) internal pure returns (address[] memory _recipients) {
+        _recipients = new address[](2);
+        (_recipients[0], _recipients[1]) = (_a, _b);
+    }
+
+    function _ratios() internal pure returns (uint32[] memory _shares) {
+        _shares = new uint32[](2);
+        (_shares[0], _shares[1]) = (950_000, 50_000);
+    }
+
+    function _newFiller(CapitalPipelinePlugin _plugin) internal returns (MockFiller _mock) {
+        _mock = new MockFiller(_plugin);
+        tokenB.mint(address(_mock), 1_000_000 ether);
+        vm.warp(block.timestamp + EPOCH);
+    }
+
+    function _leafHash(address _account, uint256 _cumulative) internal pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(_account, _cumulative))));
+    }
+
+    function _hashPair(bytes32 _a, bytes32 _b) internal pure returns (bytes32) {
+        return _a < _b ? keccak256(abi.encode(_a, _b)) : keccak256(abi.encode(_b, _a));
     }
 
     function _assertPermissions(address _plugin, address[] memory _helpers, bool _expected) internal view {
