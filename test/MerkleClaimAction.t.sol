@@ -126,6 +126,23 @@ contract MerkleClaimActionTest is Fixture {
         _plugin.trigger(_claim(alice, 10 ether, address(0), 2));
     }
 
+    /// Below a branch, the 1% fee would take a share of the whole DAO balance on every claim
+    function test_RevertWhen_BelowABranch() public {
+        Node[] memory _tree = new Node[](4);
+        _tree[0] = _branch(NO_ACTION, 1, 990_000, 3, 10_000);
+        _tree[1] = _then(merkle, 2);
+        _tree[2] = _leaf(toBeneficiary);
+        _tree[3] = _leaf(_deployTransfer(fee));
+        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _tree);
+
+        bytes[] memory _data = new bytes[](4);
+        _data[1] = _claim(alice, 10 ether, address(0), 1)[0];
+
+        vm.expectRevert(MerkleClaimAction.NotTheWholeBudget.selector);
+        vm.prank(alice);
+        _plugin.trigger(_data);
+    }
+
     /// Claim → swap A to B at 2 → pay the beneficiary (redirected to carol)
     function test_ClaimThenSwap() public {
         CapitalPipelinePlugin _plugin = _deployPlugin(budget, _chain(merkle, _swap(), toBeneficiary));

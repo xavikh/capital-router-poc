@@ -12,15 +12,16 @@ import {Input, Movement} from "../lib/types.sol";
 ///      (`DaoAuthorizableUpgradeable`). The plugin rejects actions bound to another DAO or to none.
 interface INodeAction {
     /// @notice The budget this action is bound to, or address(0) if it works with any input.
-    ///         A bound action can only be the root of a flow on that budget.
+    ///         A bound action must be fed by that budget: the root of the flow, or a node below
+    ///         branches without an action.
     function budget() external view returns (IBudget);
 
     /// @notice Reverts if the action must not run on `input`
     function preconditions(address caller, Input calldata input) external view;
 
-    /// @notice What the node spends from `input` (`inAmount`: the root may take less than its input,
-    ///         every other node all of it), what it produces (`outToken`/`outAmount`, zero for a leaf)
-    ///         and optionally a `beneficiary`, plus the actions that do the work.
+    /// @notice What the node spends from `input` (`inAmount`: a node fed by the budget may take less
+    ///         than its input, every other node all of it), what it produces (`outToken`/`outAmount`,
+    ///         zero for a leaf) and optionally a `beneficiary`, plus the actions that do the work.
     /// @dev `outAmount` must be known here: it is divided among the children before they run
     function build(address caller, bytes calldata data, Input calldata input)
         external

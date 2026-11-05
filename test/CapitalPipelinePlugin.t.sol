@@ -150,12 +150,25 @@ contract CapitalPipelinePluginTest is Fixture {
         );
     }
 
-    function test_RevertWhen_ABoundActionIsNotTheRoot() public {
-        _expectInitRevert(
-            budget,
-            _fork(NO_ACTION, 500_000, action, 500_000, keep),
-            abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 1)
-        );
+    function test_ABoundActionCanSitBelowNestedBranchesWithoutAction() public {
+        Node[] memory _tree = new Node[](6);
+        _tree[0] = _branch(NO_ACTION, 1, 500_000, 2, 500_000);
+        _tree[1] = _leaf(keep);
+        _tree[2] = _branch(NO_ACTION, 3, 500_000, 5, 500_000);
+        _tree[3] = _then(action, 4);
+        (_tree[4], _tree[5]) = (_leaf(keep), _leaf(keep));
+
+        assertEq(address(_deployPlugin(budget, _tree).nodes()[3].action), address(action));
+    }
+
+    function test_RevertWhen_ABoundActionIsBelowAnAction() public {
+        Node[] memory _tree = new Node[](5);
+        _tree[0] = _then(_bad(BadAction.Mode.Pass), 1);
+        _tree[1] = _branch(NO_ACTION, 2, 500_000, 4, 500_000);
+        _tree[2] = _then(action, 3);
+        (_tree[3], _tree[4]) = (_leaf(keep), _leaf(keep));
+
+        _expectInitRevert(budget, _tree, abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 2));
     }
 
     function test_RevertWhen_ANodeIsAnImplementation() public {
@@ -264,6 +277,33 @@ contract CapitalPipelinePluginTest is Fixture {
 
         assertEq(_budget.available(), 0);
         assertEq(_budget.lastSeenBalance(), DAO_A - RATE, "the checkpoint sees the balance after both leaves");
+    }
+
+    /// A stream split between grants and an auction: the auction's offer grows at half the rate
+    function test_ABranchSplitsTheStreamBetweenGrantsAndAnAuction() public {
+        MockFiller _filler = new MockFiller(_deployPlugin(budget, _grantsAndAuction()));
+        tokenB.mint(address(_filler), DEMAND);
+
+        _filler.fillWithoutData();
+
+        assertEq(tokenA.balanceOf(alice), RATE / 2, "half the stream to grants");
+        assertEq(tokenA.balanceOf(address(_filler)), RATE / 2, "half the stream on offer");
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B + DEMAND, "the proceeds stay in the treasury");
+        assertEq(budget.available(), 0, "the stream restarts for both");
+    }
+
+    /// The auction offers at most maxOffered(); the rest of its share never leaves the DAO
+    function test_AnAuctionBelowABranchMayTakePartOfItsShare() public {
+        MockFiller _filler = new MockFiller(_deployPlugin(budget, _grantsAndAuction()));
+        tokenB.mint(address(_filler), DEMAND);
+        vm.warp(block.timestamp + 5 * EPOCH); // 60 A: 30 for grants, 30 for the auction
+
+        _filler.fillWithoutData();
+
+        assertEq(tokenA.balanceOf(alice), 30 ether, "grants get their whole share");
+        assertEq(tokenA.balanceOf(address(_filler)), action.maxOffered(), "the auction offers 20 A");
+        assertEq(tokenA.balanceOf(address(dao)), DAO_A - 50 ether, "10 A stay in the DAO");
+        assertEq(budget.available(), 0, "the stream restarts");
     }
 
     function test_RevertWhen_FillerUnderDelivers() public {
@@ -442,6 +482,15 @@ contract CapitalPipelinePluginTest is Fixture {
 
     function _bad(BadAction.Mode _mode) internal returns (INodeAction) {
         return new BadAction(_mode, address(dao), tokenB);
+    }
+
+    /// @dev A branch without an action: 50% to alice (grants), 50% to the auction, whose proceeds are kept
+    function _grantsAndAuction() internal returns (Node[] memory _tree) {
+        _tree = new Node[](4);
+        _tree[0] = _branch(NO_ACTION, 1, 500_000, 2, 500_000);
+        _tree[1] = _leaf(_deployTransfer(alice));
+        _tree[2] = _then(action, 3);
+        _tree[3] = _leaf(keep);
     }
 
     function _expectInitRevert(IBudget _budget, Node[] memory _tree, bytes memory _error) internal {

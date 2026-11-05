@@ -54,7 +54,7 @@ interface IBudget {
 }
 
 interface INodeAction {
-    function budget() external view returns (IBudget);   // bound budget (root only), or address(0)
+    function budget() external view returns (IBudget);   // bound budget (nodes fed by it only), or address(0)
     function preconditions(address caller, Input calldata input) external view;   // revert = blocked
     function build(address caller, bytes calldata data, Input calldata input)
         external view returns (Movement memory movement, Action[] memory actions);
@@ -111,17 +111,17 @@ budget  FundedStreamBudget(USDC)             budget  FundedStreamBudget(ETH)
    └─ 20% → Transfer(carol)
 ```
 
-Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not summing to 100% (`InvalidWeights`), an action-less leaf (`MissingAction`), a leaf that outputs something (`LeafLeftOutput` at trigger), a node that takes part of its input (`NodeIncomplete` at trigger).
+Rejected shapes: a bound action below a node with an action (`BudgetMismatch`), a Merkle claim below a branch (`NotTheWholeBudget` at trigger), weights not summing to 100% (`InvalidWeights`), an action-less leaf (`MissingAction`), a leaf that outputs something (`LeafLeftOutput` at trigger), a node that takes part of its input (`NodeIncomplete` at trigger).
 
 ## Rules
 
 1. **Preconditions and postconditions belong to the action interface.** The plugin calls all three hooks on every node with an action.
-2. **Every node must succeed.** The root takes a non-zero amount, up to the budget; every other node takes exactly its input; leaves output nothing. A trigger with nothing to do reverts.
+2. **Every node must succeed.** A node fed by the budget (the root, or one below branches without an action) takes a non-zero amount, up to its input; every other node takes exactly its input; leaves output nothing. A trigger with nothing to do reverts.
 3. **The budget is read once and committed once, after the whole tree,** so a stream checkpoint sees the final balance.
 4. **Planning is view-only.** Every state change is a DAO action; each node is planned right before its own `execute`.
 5. **Actions declare their output in `build`.** Branch weights divide the declared output. Swap surplus above the declared minimum stays in the DAO.
 6. **A beneficiary, once set, can't change.** Only `MerkleClaimAction` sets one; it flows down every branch.
-7. **Bound actions (OpenFill, MerkleClaim) are only allowed at the root.**
+7. **Bound actions (OpenFill, MerkleClaim) must be fed by their budget:** the root, or a node below branches without an action, whose input is still untouched budget tokens. What such a node doesn't take never left the DAO. `MerkleClaimAction` stays at the root: below a branch its siblings would take a share of the whole budget on every claim, so it reverts unless its input is the whole budget.
 8. **No action may target the DAO or the plugin itself**, so no node can grant permissions, upgrade the DAO or reconfigure the flow mid-trigger. `setFlow` is also `nonReentrant`.
 9. **A parameter change never alters what has already accrued.** Stream setters sync first; price setters restart the auction.
 10. **Every component belongs to the plugin's DAO.** The plugin rejects a budget or action whose `dao()` isn't its own, so an implementation (bound to no DAO) or another DAO's component can never run in a flow.

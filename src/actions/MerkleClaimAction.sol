@@ -16,7 +16,9 @@ import {MANAGER_PERMISSION_ID, RECORD_CLAIM_PERMISSION_ID} from "../lib/constant
 /// @notice Cumulative Merkle distribution. Each leaf is (account, cumulative amount); an account
 ///         can claim `cumulative − claimed` at any time. A new root raises the cumulative amounts
 ///         for the next round.
-/// @dev Must be the root of a flow on its budget. Outputs only what the account is owed (not the
+/// @dev Must be the root of a flow on its budget: below a branch, its siblings would take a share
+///      of the whole budget on every claim, so it reverts unless its input is the whole budget.
+///      Outputs only what the account is owed (not the
 ///      whole budget) and sets the flow's beneficiary, so child nodes can swap it before a
 ///      `TransferToBeneficiaryAction` pays it out. One claim per trigger.
 ///      Leaves use OpenZeppelin's StandardMerkleTree format: keccak256(bytes.concat(keccak256(abi.encode(account, cumulative)))).
@@ -44,6 +46,7 @@ contract MerkleClaimAction is INodeAction, DaoAuthorizableUpgradeable {
     error NotTheAccount();
     error NothingToClaim();
     error InvalidBeneficiary();
+    error NotTheWholeBudget();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -61,7 +64,10 @@ contract MerkleClaimAction is INodeAction, DaoAuthorizableUpgradeable {
     // INodeAction
 
     /// @inheritdoc INodeAction
-    function preconditions(address, Input calldata) external view virtual {}
+    /// @dev Keeps the claim at the root, where the input is the whole budget
+    function preconditions(address, Input calldata _input) external view virtual {
+        if (_input.amount != budget.available()) revert NotTheWholeBudget();
+    }
 
     /// @inheritdoc INodeAction
     function build(address _caller, bytes calldata _data, Input calldata _input)

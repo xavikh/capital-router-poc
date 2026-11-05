@@ -1,7 +1,7 @@
 {
   "name": "OpenFillAction",
   "version": 1,
-  "description": "Root action. Dutch-auction swap of the budget's token: any filler pays the demanded amount and receives the offer. Restarts its budget when the manager changes the price, so it needs CHECKPOINT_PERMISSION_ID on that budget.",
+  "description": "Root action, or below branches without an action. Dutch-auction swap of the budget's token: any filler pays the demanded amount and receives the offer. Restarts its budget when the manager changes the price, so it needs CHECKPOINT_PERMISSION_ID on that budget.",
   "initialize": {
     "inputs": [
       {
