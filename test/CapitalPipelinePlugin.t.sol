@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
+import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth/auth.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
@@ -10,6 +11,7 @@ import {BalanceBudget} from "../src/budgets/BalanceBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
 import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
+import {KeepAction} from "../src/actions/KeepAction.sol";
 import {IBudget} from "../src/interfaces/IBudget.sol";
 import {INodeAction} from "../src/interfaces/INodeAction.sol";
 import {Node} from "../src/lib/types.sol";
@@ -154,6 +156,41 @@ contract CapitalPipelinePluginTest is Fixture {
             budget,
             _fork(NO_ACTION, 500_000, action, 500_000, keep),
             abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 1)
+        );
+    }
+
+    function test_RevertWhen_ANodeIsAnImplementation() public {
+        KeepAction _implementation = new KeepAction();
+
+        _expectInitRevert(
+            budget,
+            _one(_implementation),
+            abi.encodeWithSelector(CapitalPipelinePlugin.ForeignComponent.selector, address(_implementation))
+        );
+    }
+
+    function test_RevertWhen_ANodeBelongsToAnotherDao() public {
+        KeepAction _foreign = _deployKeep(IDAO(makeAddr("otherDao")));
+
+        _expectInitRevert(
+            budget,
+            _one(_foreign),
+            abi.encodeWithSelector(CapitalPipelinePlugin.ForeignComponent.selector, address(_foreign))
+        );
+    }
+
+    function test_RevertWhen_TheBudgetBelongsToAnotherDao() public {
+        BalanceBudget _foreign = BalanceBudget(
+            ProxyLib.deployMinimalProxy(
+                address(new BalanceBudget()),
+                abi.encodeCall(BalanceBudget.initialize, (IDAO(makeAddr("otherDao")), tokenA))
+            )
+        );
+
+        _expectInitRevert(
+            _foreign,
+            _one(keep),
+            abi.encodeWithSelector(CapitalPipelinePlugin.ForeignComponent.selector, address(_foreign))
         );
     }
 

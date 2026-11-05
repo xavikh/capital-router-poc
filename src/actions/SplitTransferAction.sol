@@ -2,8 +2,11 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
+import {
+    DaoAuthorizableUpgradeable
+} from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
 import {ISplitter} from "../interfaces/ISplitter.sol";
@@ -16,11 +19,13 @@ import {tokenBalance, transferAction} from "../lib/tokens.sol";
 ///         recipient so one listed twice can't hide a failed transfer.
 /// @dev Rounding dust the splitter doesn't allocate stays in the DAO. Splitters must not allocate
 ///      to the DAO itself (use a branch with a KeepAction instead).
-contract SplitTransferAction is INodeAction, Initializable {
+contract SplitTransferAction is INodeAction, DaoAuthorizableUpgradeable {
     /// @notice Computes the recipients and amounts
     ISplitter public splitter;
 
     error NoSplitter();
+    /// @notice Thrown when the splitter belongs to another DAO, or is an implementation
+    error ForeignSplitter();
     error AllocationExceedsInput(uint256 allocated, uint256 input);
     error ReceiptShortfall(IERC20 token, address recipient, uint256 expected, uint256 actual);
 
@@ -29,8 +34,11 @@ contract SplitTransferAction is INodeAction, Initializable {
         _disableInitializers();
     }
 
-    function initialize(ISplitter _splitter) external initializer {
+    /// @dev The splitter must already be initialized for the same DAO
+    function initialize(IDAO _dao, ISplitter _splitter) external initializer {
         if (address(_splitter) == address(0)) revert NoSplitter();
+        if (DaoAuthorizableUpgradeable(address(_splitter)).dao() != _dao) revert ForeignSplitter();
+        __DaoAuthorizableUpgradeable_init(_dao);
         splitter = _splitter;
     }
 

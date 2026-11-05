@@ -11,6 +11,8 @@ import {TransferAction} from "../src/actions/TransferAction.sol";
 import {TransferBase} from "../src/actions/TransferBase.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
+import {KeepAction} from "../src/actions/KeepAction.sol";
+import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
 import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
 import {ISplitter} from "../src/interfaces/ISplitter.sol";
 import {Plan} from "../src/lib/types.sol";
@@ -63,7 +65,7 @@ contract LeafActionsTest is Fixture {
         TransferAction _transfer = TransferAction(ProxyLib.deployMinimalProxy(address(new TransferAction()), ""));
 
         vm.expectRevert(TransferAction.NoRecipient.selector);
-        _transfer.initialize(address(0));
+        _transfer.initialize(dao, address(0));
     }
 
     // Transfer to beneficiary
@@ -120,7 +122,7 @@ contract LeafActionsTest is Fixture {
         _token.mint(address(dao), 100 ether);
         CapitalPipelinePlugin _plugin = _deployPlugin(
             _deployBalanceBudget(IERC20(address(_token))),
-            _one(_deploySplitTransfer(new DuplicateRecipientSplitter(alice)))
+            _one(_deploySplitTransfer(new DuplicateRecipientSplitter(address(dao), alice)))
         );
 
         // Actions 0 and 1 are the transfers, action 2 the postcondition (alice expected 100, has 50)
@@ -129,7 +131,8 @@ contract LeafActionsTest is Fixture {
     }
 
     function test_RevertWhen_TheSplitterAllocatesTooMuch() public {
-        CapitalPipelinePlugin _plugin = _deployPlugin(budget, _one(_deploySplitTransfer(new OverAllocatingSplitter())));
+        CapitalPipelinePlugin _plugin =
+            _deployPlugin(budget, _one(_deploySplitTransfer(new OverAllocatingSplitter(address(dao)))));
 
         vm.expectRevert(abi.encodeWithSelector(SplitTransferAction.AllocationExceedsInput.selector, DAO_A + 1, DAO_A));
         _plugin.trigger(noData);
@@ -140,7 +143,31 @@ contract LeafActionsTest is Fixture {
             SplitTransferAction(ProxyLib.deployMinimalProxy(address(new SplitTransferAction()), ""));
 
         vm.expectRevert(SplitTransferAction.NoSplitter.selector);
-        _split.initialize(ISplitter(address(0)));
+        _split.initialize(dao, ISplitter(address(0)));
+    }
+
+    function test_RevertWhen_TheSplitterIsAnImplementation() public {
+        SplitTransferAction _split =
+            SplitTransferAction(ProxyLib.deployMinimalProxy(address(new SplitTransferAction()), ""));
+        RatioSplitter _implementation = new RatioSplitter();
+
+        vm.expectRevert(SplitTransferAction.ForeignSplitter.selector);
+        _split.initialize(dao, _implementation);
+    }
+
+    // Implementations
+
+    function test_RevertWhen_InitializingAnImplementation() public {
+        BurnAction _burn = new BurnAction();
+        KeepAction _keep = new KeepAction();
+        TransferToBeneficiaryAction _toBeneficiary = new TransferToBeneficiaryAction();
+
+        vm.expectRevert("Initializable: contract is already initialized");
+        _burn.initialize(dao);
+        vm.expectRevert("Initializable: contract is already initialized");
+        _keep.initialize(dao);
+        vm.expectRevert("Initializable: contract is already initialized");
+        _toBeneficiary.initialize(dao);
     }
 }
 

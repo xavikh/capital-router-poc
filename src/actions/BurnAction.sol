@@ -2,20 +2,32 @@
 pragma solidity ^0.8.28;
 
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
+import {
+    DaoAuthorizableUpgradeable
+} from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
 import {Plan} from "../lib/types.sol";
 import {NATIVE} from "../lib/tokens.sol";
 
 /// @title BurnAction
-/// @notice Leaf that burns its whole input with `ERC20Burnable.burn`, lowering the total supply.
-///         Stateless: one deployment serves every plugin.
+/// @notice Leaf that burns its whole input with `ERC20Burnable.burn`, lowering the total supply
 /// @dev The token must implement `burn(uint256)`; otherwise the DAO action reverts. The plugin's
 ///      balance check confirms the DAO spent no more than the input.
-contract BurnAction is INodeAction {
+contract BurnAction is INodeAction, DaoAuthorizableUpgradeable {
     /// @notice Thrown when the input is native ETH, which can't be burned
     error CannotBurnNative();
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(IDAO _dao) external initializer {
+        __DaoAuthorizableUpgradeable_init(_dao);
+    }
 
     /// @inheritdoc INodeAction
     function budget() external pure returns (IBudget) {}

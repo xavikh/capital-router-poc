@@ -123,7 +123,7 @@ contract CapitalPipelinePluginSetup is PluginSetup {
             splitterImplementation, abi.encodeCall(RatioSplitter.initialize, (_dao, _params.recipients, _params.ratios))
         );
         _helpers[3] = ProxyLib.deployMinimalProxy(
-            splitTransferImplementation, abi.encodeCall(SplitTransferAction.initialize, (ISplitter(_helpers[2])))
+            splitTransferImplementation, abi.encodeCall(SplitTransferAction.initialize, (_dao, ISplitter(_helpers[2])))
         );
     }
 

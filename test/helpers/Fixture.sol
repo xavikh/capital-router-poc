@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
+import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
 import {BalanceBudget} from "../../src/budgets/BalanceBudget.sol";
@@ -49,10 +50,10 @@ abstract contract Fixture is Test {
     address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
 
-    // Stateless leaves: one deployment serves every plugin
-    BurnAction internal burn = new BurnAction();
-    KeepAction internal keep = new KeepAction();
-    TransferToBeneficiaryAction internal toBeneficiary = new TransferToBeneficiaryAction();
+    // Leaves without settings, cloned for the test DAO
+    BurnAction internal burn;
+    KeepAction internal keep;
+    TransferToBeneficiaryAction internal toBeneficiary;
 
     DAO internal dao;
     ERC20Mock internal tokenA;
@@ -72,6 +73,17 @@ abstract contract Fixture is Test {
         tokenB = new ERC20Mock("Demanded", "B");
         tokenA.mint(address(dao), DAO_A);
         tokenB.mint(address(dao), DAO_B);
+
+        burn = BurnAction(
+            ProxyLib.deployMinimalProxy(address(new BurnAction()), abi.encodeCall(BurnAction.initialize, (dao)))
+        );
+        keep = _deployKeep(dao);
+        toBeneficiary = TransferToBeneficiaryAction(
+            ProxyLib.deployMinimalProxy(
+                address(new TransferToBeneficiaryAction()),
+                abi.encodeCall(TransferToBeneficiaryAction.initialize, (dao))
+            )
+        );
     }
 
     // Budgets
@@ -162,15 +174,24 @@ abstract contract Fixture is Test {
 
     function _deployTransfer(address _to) internal returns (TransferAction) {
         return TransferAction(
-            ProxyLib.deployMinimalProxy(address(new TransferAction()), abi.encodeCall(TransferAction.initialize, (_to)))
+            ProxyLib.deployMinimalProxy(
+                address(new TransferAction()), abi.encodeCall(TransferAction.initialize, (dao, _to))
+            )
         );
     }
 
     function _deploySplitTransfer(ISplitter _splitter) internal returns (SplitTransferAction) {
         return SplitTransferAction(
             ProxyLib.deployMinimalProxy(
-                address(new SplitTransferAction()), abi.encodeCall(SplitTransferAction.initialize, (_splitter))
+                address(new SplitTransferAction()), abi.encodeCall(SplitTransferAction.initialize, (dao, _splitter))
             )
+        );
+    }
+
+    /// @dev A keep leaf bound to `_dao` (another DAO's component when `_dao` isn't the test DAO)
+    function _deployKeep(IDAO _dao) internal returns (KeepAction) {
+        return KeepAction(
+            ProxyLib.deployMinimalProxy(address(new KeepAction()), abi.encodeCall(KeepAction.initialize, (_dao)))
         );
     }
 

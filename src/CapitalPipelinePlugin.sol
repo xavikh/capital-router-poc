@@ -7,6 +7,9 @@ import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/se
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {IExecutor, Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {PluginCloneable} from "@aragon/osx-commons-contracts/src/plugin/PluginCloneable.sol";
+import {
+    DaoAuthorizableUpgradeable
+} from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {IBudget} from "./interfaces/IBudget.sol";
 import {INodeAction} from "./interfaces/INodeAction.sol";
 import {Plan, Node} from "./lib/types.sol";
@@ -44,6 +47,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     // Configuration errors
     error NoBudget();
+    error ForeignComponent(address component);
     error InvalidNodeCount(uint256 count);
     error MissingAction(uint256 nodeIndex);
     error InvalidChild(uint256 nodeIndex, uint256 childIndex);
@@ -269,6 +273,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     function _setFlow(IBudget _budget, Node[] calldata _newNodes) internal {
         if (address(_budget) == address(0)) revert NoBudget();
+        _checkOwnDao(address(_budget));
         uint256 _len = _newNodes.length;
         if (_len == 0 || _len > MAX_NODES) revert InvalidNodeCount(_len);
 
@@ -297,6 +302,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         if (address(_node.action) == address(0)) {
             if (_count < 2) revert MissingAction(_index);
         } else {
+            _checkOwnDao(address(_node.action));
             IBudget _bound = _node.action.budget();
             if (address(_bound) != address(0) && (_index != 0 || _bound != _budget)) revert BudgetMismatch(_index);
         }
@@ -320,5 +326,11 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
             _sum += _node.weights[k];
         }
         if (_sum != RATIO_BASE) revert InvalidWeights(_index);
+    }
+
+    /// @dev Every component is a clone initialized for this plugin's DAO. Implementations (bound to
+    ///      no DAO) and other DAOs' components are rejected.
+    function _checkOwnDao(address _component) internal view {
+        if (DaoAuthorizableUpgradeable(_component).dao() != dao()) revert ForeignComponent(_component);
     }
 }

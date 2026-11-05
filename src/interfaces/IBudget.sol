@@ -7,6 +7,8 @@ import {Plan} from "../lib/types.sol";
 
 /// @title IBudget
 /// @notice How much of a token a flow may spend right now
+/// @dev Budgets are clones initialized for one DAO and expose it as `dao()`
+///      (`DaoAuthorizableUpgradeable`). The plugin rejects budgets bound to another DAO or to none.
 interface IBudget {
     /// @notice The token this budget releases
     function token() external view returns (IERC20);

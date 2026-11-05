@@ -74,6 +74,12 @@ contract BadAction is INodeAction {
 
 /// @notice A splitter that allocates 1 wei more than it was given
 contract OverAllocatingSplitter is ISplitter {
+    address public immutable dao;
+
+    constructor(address _dao) {
+        dao = _dao;
+    }
+
     function split(uint256 _amount) external pure returns (Allocation[] memory _allocations) {
         _allocations = new Allocation[](1);
         _allocations[0] = Allocation({recipient: address(0xBEEF), amount: _amount + 1});
@@ -82,10 +88,11 @@ contract OverAllocatingSplitter is ISplitter {
 
 /// @notice Lists the same recipient twice, splitting the amount 50/50 between the two entries
 contract DuplicateRecipientSplitter is ISplitter {
+    address public immutable dao;
     address public immutable recipient;
 
-    constructor(address _recipient) {
-        recipient = _recipient;
+    constructor(address _dao, address _recipient) {
+        (dao, recipient) = (_dao, _recipient);
     }
 
     function split(uint256 _amount) external view returns (Allocation[] memory _allocations) {

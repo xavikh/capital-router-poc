@@ -8,6 +8,8 @@ import {Plan} from "../lib/types.sol";
 /// @title INodeAction
 /// @notice What a node of a flow tree does with its input. The plugin calls all three hooks, in
 ///         order, on every node that has an action, so an action's safety checks can't be left out.
+/// @dev Actions are clones initialized for one DAO and expose it as `dao()`
+///      (`DaoAuthorizableUpgradeable`). The plugin rejects actions bound to another DAO or to none.
 interface INodeAction {
     /// @notice The budget this action is bound to, or address(0) if it works with any input.
     ///         A bound action can only be the root of a flow on that budget.

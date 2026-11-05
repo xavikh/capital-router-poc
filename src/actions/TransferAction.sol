@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {TransferBase} from "./TransferBase.sol";
 import {Plan} from "../lib/types.sol";
 
 /// @title TransferAction
 /// @notice Leaf that sends its whole input to a fixed recipient
-contract TransferAction is TransferBase, Initializable {
+contract TransferAction is TransferBase {
     /// @notice Who receives the node's input
     address public recipient;
 
@@ -19,8 +19,9 @@ contract TransferAction is TransferBase, Initializable {
         _disableInitializers();
     }
 
-    function initialize(address _to) external initializer {
+    function initialize(IDAO _dao, address _to) external initializer {
         if (_to == address(0)) revert NoRecipient();
+        __DaoAuthorizableUpgradeable_init(_dao);
         recipient = _to;
     }
 
