@@ -1,23 +1,23 @@
-// The playground page: renders the fork's state and the recipe builder, and wires the buttons.
+// The playground page: the fork's state, a graph editor for recipes, and the installed flows.
+// Drawflow is loaded as a classic script (window.Drawflow) before this module runs.
 import * as lib from "./lib.js";
+import * as graph from "./graph.js";
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const clone = (x) => JSON.parse(JSON.stringify(x));
 const load = (path) =>
   fetch(`../${path}`).then((r) => {
     if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
     return r.json();
   });
 
-const SAVED = "capital-pipeline-recipes";
+const SAVED = "capital-pipeline-graphs";
 let ctx;
-let templates;
-let recipe;
-let recipeName = "";
+let editor;
+let recipe = null; // the recipe the graph describes, or null while it isn't valid
 
-// Saved recipes (this browser only)
+// Saved graphs (this browser only)
 
 function saved() {
   try {
@@ -32,6 +32,11 @@ function storeSaved(all) {
   } catch {
     /* storage unavailable: saving is a convenience */
   }
+}
+function renderSaved(selected = "") {
+  const names = Object.keys(saved());
+  $("#saved-list").innerHTML = names.map((n) => `<option ${n === selected ? "selected" : ""}>${esc(n)}</option>`).join("");
+  $("#saved-load").disabled = $("#saved-delete").disabled = names.length === 0;
 }
 
 // Status
@@ -51,191 +56,63 @@ async function refresh() {
   await renderFlows();
 }
 
-// Builder
+// Graph editor
 
-function useRecipe(name, value) {
-  recipeName = name;
-  recipe = clone(value);
-  renderBuilder();
+const GROUPS = [
+  ["Budgets", ["FundedStreamBudget@1", "BalanceBudget@1"]],
+  ["Root actions", ["OpenFillAction@1", "MerkleClaimAction@1"]],
+  ["Splits", [graph.BRANCH]],
+  ["Leaves", ["TransferAction@1", "TransferToBeneficiaryAction@1", "BurnAction@1", "KeepAction@1"]],
+];
+
+function renderPalette() {
+  $("#palette").innerHTML =
+    GROUPS.map(
+      ([title, ids]) =>
+        `<h4>${title}</h4>${ids
+          .map((id) => `<button data-box="${id}">${id === graph.BRANCH ? "Branch" : esc(id.split("@")[0])}</button>`)
+          .join("")}`,
+    ).join("") +
+    `<p class="hint">Drag from a box's right dot to another box's left dot to connect them. Click a box or a link and press Delete to remove it. Children are ordered top to bottom.</p>`;
 }
 
-const refOptions = (selected, extra = []) =>
-  [...extra, ...recipe.components.map((c, i) => [`ref(${i})`, `ref(${i}) ${c.id.split("@")[0]}`])]
-    .map(([v, label]) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(label)}</option>`)
-    .join("");
-
-function renderComponent(c, i) {
-  const ids = Object.keys(ctx.deployment.components);
-  const inputs = ctx.meta[c.id].initialize.inputs;
-  const fields = inputs
-    .map(
-      (input) => `<label title="${esc(input.description)}">${esc(input.name)} <span class="hint">${esc(input.type)}</span></label>
-        <input class="wide" data-field="components.${i}.args.${input.name}" value="${esc(c.args[input.name] ?? "")}" title="${esc(input.description)}">`,
-    )
-    .join("");
-  return `<div class="component">
-    <div class="row">
-      <strong>ref(${i})</strong>
-      <select data-field="components.${i}.id">${ids.map((id) => `<option ${id === c.id ? "selected" : ""}>${id}</option>`).join("")}</select>
-      <button data-remove="components.${i}">Remove</button>
-    </div>
-    <div class="fields">${fields}</div>
-  </div>`;
+function addBox(id) {
+  const canvas = $("#canvas").getBoundingClientRect();
+  const x = (canvas.width / 2 - editor.canvas_x) / editor.zoom - 110 + Math.random() * 40;
+  const y = (canvas.height / 3 - editor.canvas_y) / editor.zoom + Math.random() * 40;
+  const [inputs, outputs] = graph.ports(id);
+  editor.addNode(id, inputs, outputs, x, y, graph.kindOf(id), graph.defaultData(id, ctx.deployment), graph.nodeHtml(id, ctx.meta));
 }
 
-function renderBuilder() {
-  const savedNames = Object.keys(saved());
-  const nodes = recipe.nodes
-    .map(
-      (n, i) => `<tr>
-        <td>${i}</td>
-        <td><select data-field="nodes.${i}.action">${refOptions(n.action === null ? "" : `ref(${n.action})`, [["", "none (branch)"]])}</select></td>
-        <td><input data-field="nodes.${i}.children" value="${esc(n.children)}" placeholder="e.g. 1, 2"></td>
-        <td><input data-field="nodes.${i}.weights" value="${esc(n.weights)}" placeholder="e.g. 950000, 50000"></td>
-        <td><button data-remove="nodes.${i}">Remove</button></td>
-      </tr>`,
-    )
-    .join("");
-  const grants = recipe.grants
-    .map(
-      (g, i) => `<tr>
-        <td><select data-field="grants.${i}.where">${refOptions(g.where, [["PLUGIN", "PLUGIN"]])}</select></td>
-        <td><input class="wide" data-field="grants.${i}.who" value="${esc(g.who)}"></td>
-        <td><select data-field="grants.${i}.permission">${lib.PERMISSIONS.map((p) => `<option ${p === g.permission ? "selected" : ""}>${p}</option>`).join("")}</select></td>
-        <td><button data-remove="grants.${i}">Remove</button></td>
-      </tr>`,
-    )
-    .join("");
-
-  $("#builder-body").innerHTML = `
-    <div class="row">Start from:
-      ${Object.keys(templates).map((t) => `<button data-template="${esc(t)}">${esc(t)}</button>`).join("")}
-      <button data-template="">Empty</button>
-    </div>
-    <div class="row">Saved:
-      <select id="saved-list">${savedNames.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
-      <button data-saved="load" ${savedNames.length ? "" : "disabled"}>Load</button>
-      <button data-saved="delete" ${savedNames.length ? "" : "disabled"}>Delete</button>
-      <input id="recipe-name" value="${esc(recipeName)}" placeholder="Recipe name">
-      <button data-saved="save">Save</button>
-    </div>
-
-    <h3>Components <span class="hint">cloned in this order; nodes, budget and grants point at them with ref(i)</span></h3>
-    ${recipe.components.map(renderComponent).join("")}
-    <button data-add="components">Add component</button>
-
-    <h3>Budget</h3>
-    <select data-field="budget">${refOptions(`ref(${recipe.budget})`)}</select>
-
-    <h3>Tree <span class="hint">node 0 is the root; weights are parts of 1,000,000, one per child when there are 2+</span></h3>
-    <table><tr><th>Node</th><th>Action</th><th>Children</th><th>Weights</th><th></th></tr>${nodes}</table>
-    <button data-add="nodes">Add node</button>
-
-    <h3>Permissions <span class="hint">EXECUTE and CONFIGURE are always granted</span></h3>
-    <table><tr><th>On</th><th>To</th><th>Permission</th><th></th></tr>${grants}</table>
-    <button data-add="grants">Add permission</button>
-
-    <h3>Preview</h3>
-    <pre id="preview"></pre>
-    <div class="row">
-      <button class="primary" id="install">Install into the DAO</button>
-      <span id="install-log" class="log"></span>
-    </div>`;
-  renderPreview();
+function loadGraph(data) {
+  editor.import(data);
+  updatePreview();
 }
 
-function renderPreview() {
-  const label = (n) =>
-    n.action === null
-      ? "branch (no action)"
-      : `ref(${n.action}) ${recipe.components[n.action]?.id.split("@")[0] ?? "missing component"}`;
-  let tree;
+function loadTemplate(name) {
+  if (!name) return loadGraph({ drawflow: { Home: { data: {} } } });
+  loadGraph(graph.recipeToGraph(lib.templates(ctx.deployment)[name], ctx.meta));
+  $("#recipe-name").value = name;
+}
+
+function updatePreview() {
+  const preview = $("#preview");
   try {
+    recipe = graph.graphToRecipe(editor.export(), ctx.deployment.account, ctx.meta);
+    const name = (i) => `ref(${i}) ${recipe.components[i].id.split("@")[0]}`;
     const nodes = recipe.nodes.map((n) => ({ ...n, children: lib.numbers(n.children), weights: lib.numbers(n.weights) }));
-    const budget = recipe.components[recipe.budget]?.id.split("@")[0] ?? "missing";
-    tree = `budget  ref(${recipe.budget}) ${budget}\n${lib.describeTree(nodes, label)}`;
-  } catch (e) {
-    tree = e.message;
-  }
-  let encoded;
-  try {
-    encoded = `${(lib.encodeRecipe(ctx, recipe).length - 2) / 2} bytes of install data`;
+    const tree = lib.describeTree(nodes, (n) => (n.action === null ? "branch (no action)" : name(n.action)));
+    const who = (w) => w.replace(/ref\((\d+)\)/, (_, i) => name(Number(i))).replace(ctx.deployment.account, "you");
+    const grants = recipe.grants.map((g) => `  ${g.permission} on ${who(g.where)} → ${who(g.who)}`).join("\n");
+    const bytes = (lib.encodeRecipe(ctx, recipe).length - 2) / 2;
+    preview.className = "";
+    preview.textContent = `budget  ${name(0)}\n${tree}\n\nPermissions (besides EXECUTE and CONFIGURE)\n${grants}\n\n${bytes} bytes of install data`;
     $("#install").disabled = false;
   } catch (e) {
-    encoded = `Can't encode yet: ${e.message}`;
+    recipe = null;
+    preview.className = "bad";
+    preview.textContent = e.message;
     $("#install").disabled = true;
-  }
-  $("#preview").textContent = `${tree}\n\n${encoded}`;
-}
-
-const NEW = {
-  components: () => ({ id: "KeepAction@1", args: { dao: "DAO" } }),
-  nodes: () => ({ action: 0, children: "", weights: "" }),
-  grants: () => ({ where: "PLUGIN", who: "ANY", permission: "TRIGGER" }),
-};
-
-function setField(path, value) {
-  const keys = path.split(".");
-  const last = keys.pop();
-  const parent = keys.reduce((obj, k) => obj[k], recipe);
-  if (path === "budget") return (recipe.budget = Number(value.match(/\d+/)[0]));
-  if (last === "action") return (parent.action = value === "" ? null : Number(value.match(/\d+/)[0]));
-  if (last === "id") {
-    parent.id = value;
-    const inputs = ctx.meta[value].initialize.inputs;
-    parent.args = Object.fromEntries(inputs.map((i) => [i.name, i.name === "dao" ? "DAO" : (parent.args[i.name] ?? "")]));
-    return renderBuilder();
-  }
-  parent[last] = value;
-}
-
-function wireBuilder() {
-  const body = $("#builder-body");
-  body.addEventListener("input", (e) => {
-    if (!e.target.dataset.field) return;
-    setField(e.target.dataset.field, e.target.value);
-    renderPreview();
-  });
-  body.addEventListener("change", (e) => {
-    if (e.target.tagName !== "SELECT" || !e.target.dataset.field) return;
-    setField(e.target.dataset.field, e.target.value);
-    renderPreview();
-  });
-  body.addEventListener("click", async (e) => {
-    const { template, add, remove, saved: savedAction } = e.target.dataset;
-    if (template !== undefined) {
-      const empty = { components: [], budget: 0, nodes: [], grants: [NEW.grants()] };
-      return useRecipe(template, template ? templates[template] : empty);
-    }
-    if (add) {
-      recipe[add].push(NEW[add]());
-      return renderBuilder();
-    }
-    if (remove) {
-      const [list, index] = remove.split(".");
-      recipe[list].splice(Number(index), 1);
-      return renderBuilder();
-    }
-    if (savedAction) return handleSaved(savedAction);
-    if (e.target.id === "install") return installRecipe(e.target);
-  });
-}
-
-function handleSaved(action) {
-  const all = saved();
-  const selected = $("#saved-list").value;
-  if (action === "load" && all[selected]) return useRecipe(selected, all[selected]);
-  if (action === "delete") {
-    delete all[selected];
-    storeSaved(all);
-    return renderBuilder();
-  }
-  if (action === "save") {
-    const name = $("#recipe-name").value.trim() || "Untitled";
-    all[name] = recipe;
-    storeSaved(all);
-    recipeName = name;
-    renderBuilder();
   }
 }
 
@@ -255,6 +132,39 @@ async function installRecipe(button) {
   } finally {
     button.disabled = false;
   }
+}
+
+function wireEditor() {
+  editor = new window.Drawflow($("#canvas"));
+  editor.reroute = false;
+  editor.start();
+  for (const event of ["nodeCreated", "nodeRemoved", "connectionCreated", "connectionRemoved", "nodeDataChanged", "nodeMoved"]) {
+    editor.on(event, updatePreview);
+  }
+
+  $("#builder").addEventListener("click", (e) => {
+    const { box, template, zoom } = e.target.dataset;
+    if (box) return addBox(box);
+    if (template !== undefined) return loadTemplate(template);
+    if (zoom) return { in: () => editor.zoom_in(), out: () => editor.zoom_out(), reset: () => editor.zoom_reset() }[zoom]();
+    if (e.target.id === "install") return installRecipe(e.target);
+    if (e.target.id === "saved-save") {
+      const name = $("#recipe-name").value.trim() || "Untitled";
+      storeSaved({ ...saved(), [name]: editor.export() });
+      return renderSaved(name);
+    }
+    if (e.target.id === "saved-load") {
+      const name = $("#saved-list").value;
+      $("#recipe-name").value = name;
+      return loadGraph(saved()[name]);
+    }
+    if (e.target.id === "saved-delete") {
+      const all = saved();
+      delete all[$("#saved-list").value];
+      storeSaved(all);
+      return renderSaved();
+    }
+  });
 }
 
 // Installed flows
@@ -337,15 +247,20 @@ async function start() {
     $("#status").innerHTML = `<span class="bad">Can't reach the playground (${esc(e.message)}). Run <code>playground/up.sh</code> first.</span>`;
     return;
   }
-  templates = lib.templates(ctx.deployment);
-  wireBuilder();
+  $("#templates").innerHTML =
+    Object.keys(lib.templates(ctx.deployment))
+      .map((t) => `<button data-template="${esc(t)}">${esc(t)}</button>`)
+      .join("") + `<button data-template="">Empty</button>`;
+  renderPalette();
+  renderSaved();
+  wireEditor();
+  loadTemplate("Buy and burn");
   $("#flows").addEventListener("click", runFlow);
   $("#status").addEventListener("click", async (e) => {
     if (!e.target.dataset.advance) return;
     await lib.advance(ctx, Number(e.target.dataset.advance));
     await refresh();
   });
-  useRecipe("Buy and burn", templates["Buy and burn"]);
   renderRegistry();
   await refresh();
 }

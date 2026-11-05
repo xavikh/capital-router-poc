@@ -4,7 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Capital Pipeline Playground</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.css" />
     <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.js"></script>
     <script type="importmap">
       { "imports": { "viem": "https://esm.sh/viem@2.21.55" } }
     </script>
@@ -19,7 +21,33 @@
     <main>
       <section id="builder">
         <h2>Create a recipe</h2>
-        <div id="builder-body"></div>
+        <div class="row">Start from: <span id="templates" class="row"></span></div>
+        <div class="row">
+          Saved:
+          <select id="saved-list"></select>
+          <button id="saved-load">Load</button>
+          <button id="saved-delete">Delete</button>
+          <input id="recipe-name" placeholder="Recipe name" />
+          <button id="saved-save">Save</button>
+        </div>
+        <div class="editor">
+          <aside id="palette"></aside>
+          <div class="canvas-wrap">
+            <div id="canvas"></div>
+            <div class="zoom">
+              <button data-zoom="in" title="Zoom in">+</button>
+              <button data-zoom="out" title="Zoom out">−</button>
+              <button data-zoom="reset" title="Reset zoom">1:1</button>
+            </div>
+          </div>
+        </div>
+        <p class="hint">Address fields take an address, <code>DAO</code>, <code>PLUGIN</code> or <code>ANY</code>; amounts take whole numbers or <code>10e18</code>. Shares are parts of 1,000,000 of the parent's output.</p>
+        <h3>Preview</h3>
+        <pre id="preview"></pre>
+        <div class="row">
+          <button class="primary" id="install">Install into the DAO</button>
+          <span id="install-log" class="log"></span>
+        </div>
       </section>
       <section>
         <h2>Installed flows</h2>
@@ -27,7 +55,7 @@
       </section>
       <section>
         <h2>Components</h2>
-        <p class="hint">What the registry can clone. Address inputs take an address, <code>DAO</code>, <code>PLUGIN</code>, <code>ANY</code> or <code>ref(i)</code> for the recipe's component <code>i</code>. Amounts take whole numbers or <code>10e18</code>.</p>
+        <p class="hint">What the registry can clone, with each component's <code>initialize</code> inputs.</p>
         <div id="registry"></div>
       </section>
     </main>

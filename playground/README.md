@@ -26,12 +26,32 @@ Stopping the script stops the Anvil it started, and the fork's state goes with i
 | Section | What you can do |
 |---|---|
 | Status | See the block time and balances; advance time by an hour, a day or a week |
-| Create a recipe | Start from a recipe in `script/Recipes.sol` or from scratch; edit components, the tree and permissions; save recipes in this browser; install into the DAO |
+| Create a recipe | Build the flow as a graph (below); save graphs in this browser; install into the DAO |
 | Installed flows | See every flow's budget and tree; fill, trigger or claim |
 | Components | Every registered component, with its `initialize` inputs |
+
+## The graph editor
+
+Add boxes from the palette and drag from a box's right dot to another box's left dot to connect
+them. The budget feeds exactly one root box; every other box has one parent; children are ordered
+top to bottom. Each box holds its component's settings, and every box but the budget has a
+**share**: its part of the parent's output, out of 1,000,000, when the parent has 2+ children.
+
+| Box | Ports | Components |
+|---|---|---|
+| Budget | output | FundedStreamBudget, BalanceBudget |
+| Root action | input, output | OpenFillAction, MerkleClaimAction (bound to the budget) |
+| Branch | input, output | No action: splits its input by the children's shares |
+| Leaf | input | TransferAction, TransferToBeneficiaryAction, BurnAction, KeepAction |
+
+The preview shows the tree the graph turns into, or what's wrong with it. Component order and
+`ref(i)` come from the graph (budget first, then breadth first), and the permissions are suggested
+from it with the same rules as `script/Recipes.sol`: TRIGGER for anyone, MANAGER for you on the
+plugin and on components with settings, CHECKPOINT on a stream for the DAO and its OpenFill,
+RECORD_CLAIM on a Merkle claim for the DAO.
 
 Installing runs the real Aragon path: `PluginSetupProcessor.prepareInstallation`, then the DAO
 executes the proposal's three actions (grant ROOT, `applyInstallation`, revoke ROOT). The Merkle
 recipe uses a one-leaf tree for the first Anvil account, so claims need no proof.
 
-The page loads viem from esm.sh, so the browser needs internet access.
+The page loads viem from esm.sh and Drawflow from jsDelivr, so the browser needs internet access.
