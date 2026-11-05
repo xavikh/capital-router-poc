@@ -189,7 +189,15 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 | `RECORD_CLAIM_PERMISSION_ID` | `MerkleClaimAction` | DAO | recipe |
 | `REGISTER_PERMISSION_ID` | registry | whoever the managing DAO picks | managing DAO |
 
-`script/Recipes.sol` builds the common flows (buy and burn, buyback with a fee, Merkle claim, payroll). `script/Deploy.s.sol` deploys every implementation, the registry and the setup.
+`script/Recipes.sol` builds the common flows (buy and burn, buyback with a fee, Merkle claim, payroll).
+
+Deploying and installing:
+
+1. `script/Deploy.s.sol` deploys every implementation, the registry and the setup, then publishes the setup as version 1.1 of a new Aragon plugin repo (`PluginRepoFactory.createPluginRepoWithFirstVersion`, with the release and build metadata in `metadata/`). Once per network.
+2. `script/Install.s.sol` reads a config from `installs/` (one example per recipe), builds the recipe, calls `PluginSetupProcessor.prepareInstallation` (permissionless) and prints the proposal's three actions: grant `ROOT` to the PluginSetupProcessor, `applyInstallation`, revoke `ROOT`.
+3. The DAO votes and executes those actions.
+
+Aragon's framework contracts import ENS, so `lib/ens-contracts` (v0.0.8) is a dependency for compiling them. The end-to-end test deploys Aragon's plugin repo registry, factory and PluginSetupProcessor locally without ENS (empty subdomain) and installs a buy-and-burn flow through them.
 
 ## Failure handling
 
@@ -223,6 +231,6 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 
 - Relayed (gasless) claims, with a signature from the account over the beneficiary and every node's data.
 - Pulling OpenFill payments from the filler (`transferFrom`) to remove the inflow constraint.
-- Publishing the setup to an Aragon plugin repo on each network, with build metadata.
-- A script that uploads the metadata files to IPFS and fills `metadata/uris.json` (needed for plugin repo publishing too).
+- A script that uploads the metadata files to IPFS and fills `metadata/uris.json`.
+- An uninstall script (the setup already supports uninstalling with the recipe's grants).
 - Uniswap, CowSwap and oracle-priced swap actions (working versions exist in the coverage POC).

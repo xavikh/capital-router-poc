@@ -1,0 +1,5 @@
+{
+  "name": "Capital Pipeline",
+  "description": "Treasury flows as a tree of actions: a budget feeds a root action (a Dutch-auction swap or a Merkle claim), every node passes its output to its children by fixed weights, and leaves transfer, burn or keep what they receive. Every node is checked against the DAO's balances.",
+  "images": {}
+}

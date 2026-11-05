@@ -1,0 +1,119 @@
+{
+  "ui": {},
+  "change": "First version.",
+  "pluginSetup": {
+    "prepareInstallation": {
+      "description": "A recipe (see script/Recipes.sol). Contracts that don't exist yet are named with placeholders: DAO_REF, PLUGIN_REF and ref(i) for component i.",
+      "inputs": [
+        {
+          "name": "params",
+          "type": "tuple",
+          "internalType": "struct CapitalPipelinePluginSetup.InstallParams",
+          "description": "The recipe.",
+          "components": [
+            {
+              "name": "components",
+              "type": "tuple[]",
+              "internalType": "struct CapitalPipelinePluginSetup.Component[]",
+              "description": "Components to clone, initialized in this order.",
+              "components": [
+                {
+                  "name": "id",
+                  "type": "bytes32",
+                  "description": "Registry id, e.g. \"OpenFillAction@1\"."
+                },
+                {
+                  "name": "initData",
+                  "type": "bytes",
+                  "description": "The component's initialize call, with placeholders."
+                }
+              ]
+            },
+            {
+              "name": "budget",
+              "type": "address",
+              "internalType": "contract IBudget",
+              "description": "The flow's budget: ref(i) of a budget component."
+            },
+            {
+              "name": "nodes",
+              "type": "tuple[]",
+              "internalType": "struct Node[]",
+              "description": "The tree. Node 0 is the root.",
+              "components": [
+                {
+                  "name": "action",
+                  "type": "address",
+                  "internalType": "contract INodeAction",
+                  "description": "ref(i) of an action component, or address(0) for a branch without an action."
+                },
+                {
+                  "name": "children",
+                  "type": "uint32[]",
+                  "description": "Indexes of the child nodes, each greater than this node's."
+                },
+                {
+                  "name": "weights",
+                  "type": "uint32[]",
+                  "description": "One per child when there are 2+, summing to 1,000,000."
+                }
+              ]
+            },
+            {
+              "name": "grants",
+              "type": "tuple[]",
+              "internalType": "struct CapitalPipelinePluginSetup.Grant[]",
+              "description": "Permissions to grant, beyond EXECUTE and CONFIGURE which the setup always grants. Each may only target the plugin (PLUGIN_REF) or one of the recipe's components (ref(i)).",
+              "components": [
+                {
+                  "name": "where",
+                  "type": "address",
+                  "description": "PLUGIN_REF or ref(i)."
+                },
+                {
+                  "name": "who",
+                  "type": "address",
+                  "description": "Any address, DAO_REF, PLUGIN_REF or ref(i)."
+                },
+                {
+                  "name": "permissionId",
+                  "type": "bytes32",
+                  "description": "Any permission but CONFIGURE_PERMISSION_ID."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "prepareUpdate": {},
+    "prepareUninstallation": {
+      "description": "The recipe's grants, exactly as installed. They are checked against a hash stored at installation.",
+      "inputs": [
+        {
+          "name": "grants",
+          "type": "tuple[]",
+          "internalType": "struct CapitalPipelinePluginSetup.Grant[]",
+          "description": "Permissions to grant, beyond EXECUTE and CONFIGURE which the setup always grants. Each may only target the plugin (PLUGIN_REF) or one of the recipe's components (ref(i)).",
+          "components": [
+            {
+              "name": "where",
+              "type": "address",
+              "description": "PLUGIN_REF or ref(i)."
+            },
+            {
+              "name": "who",
+              "type": "address",
+              "description": "Any address, DAO_REF, PLUGIN_REF or ref(i)."
+            },
+            {
+              "name": "permissionId",
+              "type": "bytes32",
+              "description": "Any permission but CONFIGURE_PERMISSION_ID."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

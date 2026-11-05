@@ -7,7 +7,7 @@ evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
 via_ir = false
-fs_permissions = [{ access = "read", path = "./metadata" }]
+fs_permissions = [{ access = "read", path = "./metadata" }, { access = "read", path = "./installs" }]
 
 [invariant]
 runs = 64

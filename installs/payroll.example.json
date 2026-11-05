@@ -1,0 +1,20 @@
+{
+  "_note": "Replace every address and amount. Amounts are in the token's smallest unit.",
+  "recipe": "payroll",
+  "dao": "0x0000000000000000000000000000000000000DA0",
+  "manager": "0x000000000000000000000000000000000000AA01",
+  "stream": {
+    "token": "0x00000000000000000000000000000000000000A1",
+    "amountPerEpoch": "1000000000000000000000",
+    "maxBudget": "0",
+    "epochInterval": "86400"
+  },
+  "recipients": [
+    "0x000000000000000000000000000000000000A11C",
+    "0x0000000000000000000000000000000000000B0B"
+  ],
+  "weights": [
+    "700000",
+    "300000"
+  ]
+}

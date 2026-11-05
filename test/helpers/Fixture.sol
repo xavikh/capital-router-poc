@@ -28,10 +28,11 @@ import {
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
 /// @dev Metadata links for the deploy script, one per component (see metadata/uris.json)
-string constant METADATA_URIS = '{"FundedStreamBudget":"ipfs://FundedStreamBudget","BalanceBudget":"ipfs://BalanceBudget",'
+string constant METADATA_URIS = '{"release":"ipfs://release","build":"ipfs://build","components":{'
+    '"FundedStreamBudget":"ipfs://FundedStreamBudget","BalanceBudget":"ipfs://BalanceBudget",'
     '"OpenFillAction":"ipfs://OpenFillAction","MerkleClaimAction":"ipfs://MerkleClaimAction",'
     '"TransferAction":"ipfs://TransferAction","TransferToBeneficiaryAction":"ipfs://TransferToBeneficiaryAction",'
-    '"BurnAction":"ipfs://BurnAction","KeepAction":"ipfs://KeepAction"}';
+    '"BurnAction":"ipfs://BurnAction","KeepAction":"ipfs://KeepAction"}}';
 
 /// @notice A DAO holding the offered token A and some pre-existing demanded token B.
 ///         The test contract is the DAO's ROOT, so it can grant permissions directly.

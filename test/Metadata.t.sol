@@ -31,7 +31,7 @@ contract MetadataTest is Test {
 
     function test_UrisFileListsEveryComponent() public view {
         string memory _uris = vm.readFile("metadata/uris.json");
-        string[] memory _names = vm.parseJsonKeys(_uris, "$");
+        string[] memory _names = vm.parseJsonKeys(_uris, ".components");
 
         assertEq(_names.length, 8);
         for (uint256 i; i < _names.length; ++i) {
@@ -52,7 +52,7 @@ contract MetadataTest is Test {
         Deploy _deploy = new Deploy();
         string memory _uris = vm.replace(METADATA_URIS, "ipfs://KeepAction", "");
 
-        vm.expectRevert(abi.encodeWithSelector(Deploy.MissingMetadata.selector, "KeepAction"));
+        vm.expectRevert(abi.encodeWithSelector(Deploy.MissingMetadata.selector, "components.KeepAction"));
         _deploy.deploy(IDAO(address(this)), _uris);
     }
 

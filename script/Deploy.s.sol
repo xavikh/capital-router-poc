@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
+import {PluginRepo} from "@aragon/osx/framework/plugin/repo/PluginRepo.sol";
+import {PluginRepoFactory} from "@aragon/osx/framework/plugin/repo/PluginRepoFactory.sol";
 import {ComponentRegistry} from "../src/registry/ComponentRegistry.sol";
 import {CapitalPipelinePluginSetup} from "../src/setup/CapitalPipelinePluginSetup.sol";
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
@@ -15,25 +17,33 @@ import {BurnAction} from "../src/actions/BurnAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
 import {Recipes} from "./Recipes.sol";
 
-/// @notice Deploys every component implementation, a registry naming them and the plugin setup.
-///         `MANAGING_DAO` maintains the registry. `metadata/uris.json` holds each component's
-///         metadata link: upload `metadata/components/*.json` to IPFS and fill it in first.
-/// @dev Run: `forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast` with `MANAGING_DAO` set
+/// @notice Deploys every component implementation, a registry naming them and the plugin setup,
+///         then publishes the setup as version 1.1 of a new Aragon plugin repo.
+///         `metadata/uris.json` holds the metadata links: upload the files in `metadata/` to IPFS
+///         and fill it in first.
+/// @dev Run: `forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast` with
+///      - `MANAGING_DAO`: maintains the registry, and the plugin repo unless `PLUGIN_REPO_MAINTAINER` is set
+///      - `PLUGIN_REPO_FACTORY`: Aragon's `PluginRepoFactory` on that network
+///      - `PLUGIN_REPO_SUBDOMAIN` (optional): defaults to `capital-pipeline`
 contract Deploy is Script {
-    /// @notice Thrown when a component has no metadata link. Registry entries are write-once,
-    ///         so a component is never registered without one.
-    error MissingMetadata(string component);
+    /// @notice Thrown when a metadata link is empty. Registry entries and plugin repo versions
+    ///         can't be changed later, so nothing is published without one.
+    error MissingMetadata(string key);
 
-    function run() external returns (ComponentRegistry registry, CapitalPipelinePluginSetup setup) {
+    function run() external returns (ComponentRegistry registry, CapitalPipelinePluginSetup setup, PluginRepo repo) {
         IDAO _managingDao = IDAO(vm.envAddress("MANAGING_DAO"));
+        PluginRepoFactory _factory = PluginRepoFactory(vm.envAddress("PLUGIN_REPO_FACTORY"));
+        string memory _subdomain = vm.envOr("PLUGIN_REPO_SUBDOMAIN", string("capital-pipeline"));
+        address _maintainer = vm.envOr("PLUGIN_REPO_MAINTAINER", address(_managingDao));
         string memory _uris = vm.readFile("metadata/uris.json");
 
         vm.startBroadcast();
         (registry, setup) = deploy(_managingDao, _uris);
+        repo = publish(_factory, setup, _subdomain, _maintainer, _uris);
         vm.stopBroadcast();
     }
 
-    /// @param _uris JSON object mapping each component name to its metadata link (`ipfs://...`)
+    /// @param _uris The contents of `metadata/uris.json`
     function deploy(IDAO _managingDao, string memory _uris)
         public
         returns (ComponentRegistry registry, CapitalPipelinePluginSetup setup)
@@ -59,13 +69,32 @@ contract Deploy is Script {
         setup = new CapitalPipelinePluginSetup(registry);
     }
 
+    /// @notice Publishes `_setup` as version 1.1 of a new plugin repo, which DAOs install from
+    /// @param _subdomain The ENS name under `plugin.dao.eth`, or empty on networks without ENS
+    /// @param _uris The contents of `metadata/uris.json`
+    function publish(
+        PluginRepoFactory _factory,
+        CapitalPipelinePluginSetup _setup,
+        string memory _subdomain,
+        address _maintainer,
+        string memory _uris
+    ) public returns (PluginRepo) {
+        return _factory.createPluginRepoWithFirstVersion(
+            _subdomain, address(_setup), _maintainer, _link(_uris, "release"), _link(_uris, "build")
+        );
+    }
+
     function _registration(bytes32 _id, string memory _name, address _implementation, string memory _uris)
         internal
         pure
         returns (ComponentRegistry.Registration memory)
     {
-        bytes memory _metadata = bytes(vm.parseJsonString(_uris, string.concat(".", _name)));
-        if (_metadata.length == 0) revert MissingMetadata(_name);
-        return ComponentRegistry.Registration(_id, _implementation, _metadata);
+        return ComponentRegistry.Registration(_id, _implementation, _link(_uris, string.concat("components.", _name)));
+    }
+
+    /// @dev The metadata link at `_key` in `metadata/uris.json`; reverts if it's empty
+    function _link(string memory _uris, string memory _key) internal pure returns (bytes memory _uri) {
+        _uri = bytes(vm.parseJsonString(_uris, string.concat(".", _key)));
+        if (_uri.length == 0) revert MissingMetadata(_key);
     }
 }

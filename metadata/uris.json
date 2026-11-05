@@ -1,10 +1,14 @@
 {
-  "FundedStreamBudget": "",
-  "BalanceBudget": "",
-  "OpenFillAction": "",
-  "MerkleClaimAction": "",
-  "TransferAction": "",
-  "TransferToBeneficiaryAction": "",
-  "BurnAction": "",
-  "KeepAction": ""
+  "release": "",
+  "build": "",
+  "components": {
+    "FundedStreamBudget": "",
+    "BalanceBudget": "",
+    "OpenFillAction": "",
+    "MerkleClaimAction": "",
+    "TransferAction": "",
+    "TransferToBeneficiaryAction": "",
+    "BurnAction": "",
+    "KeepAction": ""
+  }
 }
