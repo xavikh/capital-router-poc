@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {IBudget} from "./IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 
 /// @title INodeAction
 /// @notice What a node of a flow tree does with its input. The plugin calls all three hooks, in
@@ -15,18 +15,18 @@ interface INodeAction {
     ///         A bound action can only be the root of a flow on that budget.
     function budget() external view returns (IBudget);
 
-    /// @notice Reverts if the action must not run
-    function preconditions(address caller, Plan calldata draft) external view;
+    /// @notice Reverts if the action must not run on `input`
+    function preconditions(address caller, Input calldata input) external view;
 
-    /// @notice Sets `inAmount` (the root may take less than its input, every other node all of it),
-    ///         `outToken`/`outAmount` (zero for a leaf) and optionally `beneficiary`, and returns the
-    ///         actions that do the work.
+    /// @notice What the node spends from `input` (`inAmount`: the root may take less than its input,
+    ///         every other node all of it), what it produces (`outToken`/`outAmount`, zero for a leaf)
+    ///         and optionally a `beneficiary`, plus the actions that do the work.
     /// @dev `outAmount` must be known here: it is divided among the children before they run
-    function build(address caller, bytes calldata data, Plan calldata draft)
+    function build(address caller, bytes calldata data, Input calldata input)
         external
         view
-        returns (Plan memory plan, Action[] memory actions);
+        returns (Movement memory movement, Action[] memory actions);
 
     /// @notice The checks that make the work safe, executed by the DAO right after it
-    function postconditions(address caller, Plan calldata plan) external view returns (Action[] memory);
+    function postconditions(address caller, Movement calldata movement) external view returns (Action[] memory);
 }

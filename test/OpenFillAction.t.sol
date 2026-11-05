@@ -8,7 +8,7 @@ import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/Proxy
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {IFiller} from "../src/interfaces/IFiller.sol";
-import {Plan} from "../src/lib/types.sol";
+import {Input, Movement} from "../src/lib/types.sol";
 import {MANAGER_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 
@@ -28,16 +28,16 @@ contract OpenFillActionTest is Fixture {
     }
 
     function test_BuildCapsTheOfferAtMaxOffered() public view {
-        (Plan memory _plan,) = action.build(filler, "", _draft(50 ether));
+        (Movement memory _movement,) = action.build(filler, "", _input(50 ether));
 
-        assertEq(_plan.inAmount, 20 ether);
-        assertEq(address(_plan.outToken), address(tokenB));
-        assertEq(_plan.outAmount, DEMAND);
-        assertEq(_plan.beneficiary, alice, "carries the beneficiary on");
+        assertEq(_movement.inAmount, 20 ether);
+        assertEq(address(_movement.outToken), address(tokenB));
+        assertEq(_movement.outAmount, DEMAND);
+        assertEq(_movement.beneficiary, alice, "carries the beneficiary on");
     }
 
     function test_BuildApprovesCallsBackAndClearsApproval() public view {
-        (, Action[] memory _actions) = action.build(filler, "solver-data", _draft(10 ether));
+        (, Action[] memory _actions) = action.build(filler, "solver-data", _input(10 ether));
 
         assertEq(_actions.length, 3);
         assertEq(_actions[0].to, address(tokenA));
@@ -52,15 +52,15 @@ contract OpenFillActionTest is Fixture {
     }
 
     function test_BuildReturnsNothingForAnEmptyBudget() public view {
-        (Plan memory _plan, Action[] memory _actions) = action.build(filler, "", _draft(0));
+        (Movement memory _movement, Action[] memory _actions) = action.build(filler, "", _input(0));
 
-        assertEq(_plan.inAmount, 0);
+        assertEq(_movement.inAmount, 0);
         assertEq(_actions.length, 0);
     }
 
     function test_PostconditionsAssertTheDaoReceivedTheDemand() public view {
-        (Plan memory _plan,) = action.build(filler, "", _draft(10 ether));
-        Action[] memory _checks = action.postconditions(filler, _plan);
+        (Movement memory _movement,) = action.build(filler, "", _input(10 ether));
+        Action[] memory _checks = action.postconditions(filler, _movement);
 
         assertEq(_checks.length, 1);
         assertEq(_checks[0].to, address(action));
@@ -132,9 +132,8 @@ contract OpenFillActionTest is Fixture {
         action.setMinDemandedPerOffered(DEMAND * 1e18 + 1);
     }
 
-    function _draft(uint256 _available) internal view returns (Plan memory) {
-        return
-            Plan({inToken: tokenA, inAmount: _available, outToken: tokenA, outAmount: _available, beneficiary: alice});
+    function _input(uint256 _available) internal view returns (Input memory) {
+        return Input({token: tokenA, amount: _available, beneficiary: alice});
     }
 
     function _clone() internal returns (OpenFillAction) {

@@ -12,7 +12,7 @@ import {
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget, ICheckpointedBudget} from "../interfaces/IBudget.sol";
 import {IFiller} from "../interfaces/IFiller.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 import {MANAGER_PERMISSION_ID, EXCHANGE_RATE_SCALE} from "../lib/constants.sol";
 import {NATIVE, tokenBalance, isToken} from "../lib/tokens.sol";
 
@@ -96,38 +96,38 @@ contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeabl
 
     /// @inheritdoc INodeAction
     /// @dev None in v1
-    function preconditions(address, Plan calldata) external view virtual {}
+    function preconditions(address, Input calldata) external view virtual {}
 
     /// @inheritdoc INodeAction
     /// @dev ERC20 offer: approve it to the caller, call it back, clear the approval.
     ///      Native offer: call the caller back with the offer as call value.
-    function build(address _caller, bytes calldata _data, Plan calldata _draft)
+    function build(address _caller, bytes calldata _data, Input calldata _input)
         external
         view
         virtual
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        uint256 _offered = Math.min(_draft.inAmount, maxOffered());
-        if (_offered == 0) return (_plan, _actions);
+        uint256 _offered = Math.min(_input.amount, maxOffered());
+        if (_offered == 0) return (_movement, _actions);
 
-        _plan = Plan({
-            inToken: _draft.inToken,
+        _movement = Movement({
+            inToken: _input.token,
             inAmount: _offered,
             outToken: demandedToken,
             outAmount: demandPerFill,
-            beneficiary: _draft.beneficiary
+            beneficiary: _input.beneficiary
         });
 
         bytes memory _callback =
-            abi.encodeCall(IFiller.fillOffer, (_draft.inToken, _offered, demandedToken, demandPerFill, _data));
+            abi.encodeCall(IFiller.fillOffer, (_input.token, _offered, demandedToken, demandPerFill, _data));
 
-        if (_draft.inToken == NATIVE) {
+        if (_input.token == NATIVE) {
             _actions = new Action[](1);
             _actions[0] = Action({to: _caller, value: _offered, data: _callback});
-            return (_plan, _actions);
+            return (_movement, _actions);
         }
 
-        address _in = address(_draft.inToken);
+        address _in = address(_input.token);
         _actions = new Action[](3);
         _actions[0] = Action({to: _in, value: 0, data: abi.encodeCall(IERC20.approve, (_caller, _offered))});
         _actions[1] = Action({to: _caller, value: 0, data: _callback});
@@ -136,12 +136,17 @@ contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeabl
 
     /// @inheritdoc INodeAction
     /// @dev Reverts the whole trigger unless the DAO received at least `outAmount`
-    function postconditions(address, Plan calldata _plan) external view virtual returns (Action[] memory _actions) {
-        uint256 _minBalance = tokenBalance(_plan.outToken, address(dao())) + _plan.outAmount;
+    function postconditions(address, Movement calldata _movement)
+        external
+        view
+        virtual
+        returns (Action[] memory _actions)
+    {
+        uint256 _minBalance = tokenBalance(_movement.outToken, address(dao())) + _movement.outAmount;
 
         _actions = new Action[](1);
         _actions[0] = Action({
-            to: address(this), value: 0, data: abi.encodeCall(this.assertReceived, (_plan.outToken, _minBalance))
+            to: address(this), value: 0, data: abi.encodeCall(this.assertReceived, (_movement.outToken, _minBalance))
         });
     }
 

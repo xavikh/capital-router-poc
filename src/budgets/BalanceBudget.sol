@@ -9,7 +9,7 @@ import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Movement} from "../lib/types.sol";
 import {tokenBalance, isToken} from "../lib/tokens.sol";
 
 /// @title BalanceBudget
@@ -40,5 +40,5 @@ contract BalanceBudget is IBudget, Initializable, DaoAuthorizableUpgradeable {
     }
 
     /// @inheritdoc IBudget
-    function commitActions(Plan calldata) external pure returns (Action[] memory) {}
+    function commitActions(Movement calldata) external pure returns (Action[] memory) {}
 }

@@ -11,7 +11,7 @@ import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {ICheckpointedBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Movement} from "../lib/types.sol";
 import {tokenBalance, isToken} from "../lib/tokens.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.sol";
 
@@ -141,7 +141,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     }
 
     /// @notice Restarts the stream after the spend: the plugin executes this once, after the whole flow
-    function commitActions(Plan calldata) external view virtual returns (Action[] memory _actions) {
+    function commitActions(Movement calldata) external view virtual returns (Action[] memory _actions) {
         _actions = new Action[](1);
         _actions[0] = Action({to: address(this), value: 0, data: abi.encodeCall(this.writeCheckpoint, ())});
     }

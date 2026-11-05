@@ -8,7 +8,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 import {tokenBalance, transferAction} from "../lib/tokens.sol";
 
 /// @title TransferBase
@@ -23,28 +23,35 @@ abstract contract TransferBase is INodeAction, DaoAuthorizableUpgradeable {
     function budget() external pure returns (IBudget) {}
 
     /// @inheritdoc INodeAction
-    function preconditions(address, Plan calldata) external view virtual {}
+    function preconditions(address, Input calldata) external view virtual {}
 
     /// @inheritdoc INodeAction
-    function build(address, bytes calldata, Plan calldata _draft)
+    function build(address, bytes calldata, Input calldata _input)
         external
         view
         virtual
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        _plan = Plan(_draft.inToken, _draft.inAmount, _draft.inToken, 0, _draft.beneficiary);
+        _movement = Movement(_input.token, _input.amount, _input.token, 0, _input.beneficiary);
         _actions = new Action[](1);
-        _actions[0] = transferAction(_draft.inToken, _recipient(_draft), _draft.inAmount);
+        _actions[0] = transferAction(_input.token, _recipient(_input.beneficiary), _input.amount);
     }
 
     /// @inheritdoc INodeAction
-    function postconditions(address, Plan calldata _plan) external view virtual returns (Action[] memory _checks) {
-        address _to = _recipient(_plan);
-        uint256 _minBalance = tokenBalance(_plan.inToken, _to) + _plan.inAmount;
+    function postconditions(address, Movement calldata _movement)
+        external
+        view
+        virtual
+        returns (Action[] memory _checks)
+    {
+        address _to = _recipient(_movement.beneficiary);
+        uint256 _minBalance = tokenBalance(_movement.inToken, _to) + _movement.inAmount;
 
         _checks = new Action[](1);
         _checks[0] = Action({
-            to: address(this), value: 0, data: abi.encodeCall(this.assertReceived, (_plan.inToken, _to, _minBalance))
+            to: address(this),
+            value: 0,
+            data: abi.encodeCall(this.assertReceived, (_movement.inToken, _to, _minBalance))
         });
     }
 
@@ -55,5 +62,6 @@ abstract contract TransferBase is INodeAction, DaoAuthorizableUpgradeable {
         if (_balance < _minBalance) revert ReceiptShortfall(_token, _account, _minBalance, _balance);
     }
 
-    function _recipient(Plan calldata _plan) internal view virtual returns (address);
+    /// @param _beneficiary The flow's beneficiary, address(0) if none was set
+    function _recipient(address _beneficiary) internal view virtual returns (address);
 }

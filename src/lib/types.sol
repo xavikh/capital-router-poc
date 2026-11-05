@@ -4,10 +4,18 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 
-/// @notice What a node spends and what it produces
-/// @param beneficiary Who the flowing amount belongs to, once an action sets it (a Merkle claim).
+/// @notice What a node receives: the budget at the root, a share of its parent's output elsewhere
+/// @param beneficiary Who the amount belongs to, once an action sets it (a Merkle claim).
 ///        Carried down every branch; it can't be changed once set.
-struct Plan {
+struct Input {
+    IERC20 token;
+    uint256 amount;
+    address beneficiary;
+}
+
+/// @notice What a node spends from its input and what it produces for its children
+/// @param beneficiary The input's beneficiary, or the one the node sets when there was none
+struct Movement {
     IERC20 inToken;
     uint256 inAmount;
     IERC20 outToken;

@@ -12,7 +12,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {IBudget} from "./interfaces/IBudget.sol";
 import {INodeAction} from "./interfaces/INodeAction.sol";
-import {Plan, Node} from "./lib/types.sol";
+import {Input, Movement, Node} from "./lib/types.sol";
 import {
     TRIGGER_PERMISSION_ID,
     CONFIGURE_PERMISSION_ID,
@@ -29,7 +29,7 @@ import {tokenBalance, isToken} from "./lib/tokens.sol";
 ///         keep). The budget commits once, after the whole tree ran.
 /// @dev Every node must succeed: the root takes a non-zero amount, every other node takes exactly
 ///      its input, and leaves output nothing. Anything else reverts the whole trigger.
-///      Each node with an action is planned (view) right after its parent ran and executes in its
+///      Each node with an action is built (view) right after its parent ran and executes in its
 ///      own `dao.execute`, followed by balance checks: the DAO spent no more than the node's input
 ///      and received at least its declared output. Recipient checks are the actions' own postconditions.
 contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, ReentrancyGuardUpgradeable {
@@ -42,7 +42,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     uint256 internal _nonce;
 
     event FlowUpdated(IBudget budget, Node[] nodes);
-    event NodeExecuted(uint256 indexed nodeIndex, address indexed caller, bytes32 executionId, Plan plan);
+    event NodeExecuted(uint256 indexed nodeIndex, address indexed caller, bytes32 executionId, Movement movement);
     event BudgetCommitted(bytes32 executionId);
 
     // Configuration errors
@@ -82,10 +82,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         if (_data.length != 0 && _data.length != _len) revert DataLengthMismatch(_len, _data.length);
 
         uint256 _callNonce = _nonce++;
-        IERC20 _token = budget.token();
-        uint256 _available = budget.available();
-
-        Plan memory _root = _runNode(0, Plan(_token, _available, _token, _available, address(0)), _data, _callNonce);
+        Movement memory _root = _runNode(0, Input(budget.token(), budget.available(), address(0)), _data, _callNonce);
         _commitBudget(_root, _callNonce);
     }
 
@@ -110,78 +107,83 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     // Running the tree
 
-    /// @dev Runs node `_index` on `_input`, then its children, depth first. Returns the node's plan.
-    function _runNode(uint256 _index, Plan memory _input, bytes[] calldata _data, uint256 _callNonce)
+    /// @dev Runs node `_index` on `_input`, then its children, depth first. Returns the node's movement.
+    function _runNode(uint256 _index, Input memory _input, bytes[] calldata _data, uint256 _callNonce)
         internal
-        returns (Plan memory _plan)
+        returns (Movement memory _movement)
     {
-        if (_input.inAmount == 0) revert EmptyInput(_index);
+        if (_input.amount == 0) revert EmptyInput(_index);
 
         Node storage _node = _nodes[_index];
         if (address(_node.action) == address(0)) {
-            _plan = _input; // a branch without an action passes its input on
+            // A branch without an action passes its input on
+            _movement = Movement(_input.token, _input.amount, _input.token, _input.amount, _input.beneficiary);
         } else {
             bytes calldata _nodeData = _data.length == 0 ? msg.data[0:0] : _data[_index];
-            _plan = _runAction(_index, _node.action, _input, _nodeData, _node.children.length == 0, _callNonce);
+            _movement = _runAction(_index, _node.action, _input, _nodeData, _node.children.length == 0, _callNonce);
         }
 
-        _runChildren(_node, _plan, _data, _callNonce);
+        _runChildren(_node, _movement, _data, _callNonce);
     }
 
-    function _runChildren(Node storage _node, Plan memory _plan, bytes[] calldata _data, uint256 _callNonce) internal {
+    function _runChildren(Node storage _node, Movement memory _movement, bytes[] calldata _data, uint256 _callNonce)
+        internal
+    {
         uint256 _count = _node.children.length;
         if (_count == 0) return;
         if (_count == 1) {
-            _runNode(_node.children[0], _childInput(_plan, _plan.outAmount), _data, _callNonce);
+            _runNode(_node.children[0], _childInput(_movement, _movement.outAmount), _data, _callNonce);
             return;
         }
 
-        uint256[] memory _amounts = _weighted(_plan.outAmount, _node.weights);
+        uint256[] memory _amounts = _weighted(_movement.outAmount, _node.weights);
         for (uint256 k; k < _count; ++k) {
-            _runNode(_node.children[k], _childInput(_plan, _amounts[k]), _data, _callNonce);
+            _runNode(_node.children[k], _childInput(_movement, _amounts[k]), _data, _callNonce);
         }
     }
 
     function _runAction(
         uint256 _index,
         INodeAction _action,
-        Plan memory _draft,
+        Input memory _input,
         bytes calldata _data,
         bool _leaf,
         uint256 _callNonce
-    ) internal returns (Plan memory _plan) {
+    ) internal returns (Movement memory _movement) {
         Action[] memory _actions;
-        (_plan, _actions) = _planAction(_index, _action, _draft, _data, _leaf);
+        (_movement, _actions) = _buildAction(_index, _action, _input, _data, _leaf);
 
-        (uint256 _inBefore, uint256 _outBefore) = _snapshot(_plan);
+        (uint256 _inBefore, uint256 _outBefore) = _snapshot(_movement);
         bytes32 _executionId = keccak256(abi.encode(address(this), _callNonce, _index));
         _execute(_index, _actions, _executionId);
-        _verify(_index, _plan, _inBefore, _outBefore);
+        _verify(_index, _movement, _inBefore, _outBefore);
 
-        emit NodeExecuted(_index, msg.sender, _executionId, _plan);
+        emit NodeExecuted(_index, msg.sender, _executionId, _movement);
     }
 
-    /// @dev Calls the action's hooks in order and checks its plan against the node's input
-    function _planAction(uint256 _index, INodeAction _action, Plan memory _draft, bytes calldata _data, bool _leaf)
+    /// @dev Calls the action's hooks in order and checks its movement against the node's input
+    function _buildAction(uint256 _index, INodeAction _action, Input memory _input, bytes calldata _data, bool _leaf)
         internal
         view
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        _action.preconditions(msg.sender, _draft);
+        _action.preconditions(msg.sender, _input);
         Action[] memory _work;
-        (_plan, _work) = _action.build(msg.sender, _data, _draft);
+        (_movement, _work) = _action.build(msg.sender, _data, _input);
 
-        if (_plan.inAmount > _draft.inAmount) revert InAmountExceedsInput(_index, _plan.inAmount, _draft.inAmount);
-        // The root may take less than the budget allows (but something); every other node takes all of it
-        if (_plan.inAmount == 0 || (_index != 0 && _plan.inAmount != _draft.inAmount)) {
-            revert NodeIncomplete(_index, _plan.inAmount, _draft.inAmount);
+        if (_movement.inAmount > _input.amount) {
+            revert InAmountExceedsInput(_index, _movement.inAmount, _input.amount);
         }
-        if (_plan.inToken != _draft.inToken) revert InputTokenMismatch(_index);
-        if (_leaf && _plan.outAmount != 0) revert LeafLeftOutput(_index, _plan.outAmount);
-        if (_plan.outAmount != 0 && !isToken(_plan.outToken)) revert InvalidOutToken(_index);
-        _plan.beneficiary = _keepBeneficiary(_index, _draft.beneficiary, _plan.beneficiary);
+        // The root may take less than the budget allows (but something); every other node takes all of it
+        if (_movement.inAmount == 0 || (_index != 0 && _movement.inAmount != _input.amount)) {
+            revert NodeIncomplete(_index, _movement.inAmount, _input.amount);
+        }
+        if (_movement.inToken != _input.token) revert InputTokenMismatch(_index);
+        if (_leaf && _movement.outAmount != 0) revert LeafLeftOutput(_index, _movement.outAmount);
+        if (_movement.outAmount != 0 && !isToken(_movement.outToken)) revert InvalidOutToken(_index);
+        _movement.beneficiary = _keepBeneficiary(_index, _input.beneficiary, _movement.beneficiary);
 
-        _actions = _concat(_work, _action.postconditions(msg.sender, _plan));
+        _actions = _concat(_work, _action.postconditions(msg.sender, _movement));
     }
 
     function _execute(uint256 _index, Action[] memory _actions, bytes32 _executionId) internal {
@@ -196,7 +198,7 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     }
 
     /// @dev After the whole tree ran, so a stream checkpoint sees the final balance
-    function _commitBudget(Plan memory _root, uint256 _callNonce) internal {
+    function _commitBudget(Movement memory _root, uint256 _callNonce) internal {
         Action[] memory _actions = budget.commitActions(_root);
         if (_actions.length == 0) return;
 
@@ -207,19 +209,21 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     // Balance checks
 
-    function _snapshot(Plan memory _plan) internal view returns (uint256 _inBefore, uint256 _outBefore) {
+    function _snapshot(Movement memory _movement) internal view returns (uint256 _inBefore, uint256 _outBefore) {
         address _dao = address(dao());
-        _inBefore = tokenBalance(_plan.inToken, _dao);
-        if (_plan.outToken != _plan.inToken && _plan.outAmount != 0) _outBefore = tokenBalance(_plan.outToken, _dao);
+        _inBefore = tokenBalance(_movement.inToken, _dao);
+        if (_movement.outToken != _movement.inToken && _movement.outAmount != 0) {
+            _outBefore = tokenBalance(_movement.outToken, _dao);
+        }
     }
 
     /// @dev The DAO spent at most `inAmount` and received at least `outAmount`
-    function _verify(uint256 _index, Plan memory _plan, uint256 _inBefore, uint256 _outBefore) internal view {
-        if (_plan.outToken == _plan.inToken) {
-            _checkDao(_index, _plan.inToken, _inBefore + _plan.outAmount, _plan.inAmount);
+    function _verify(uint256 _index, Movement memory _movement, uint256 _inBefore, uint256 _outBefore) internal view {
+        if (_movement.outToken == _movement.inToken) {
+            _checkDao(_index, _movement.inToken, _inBefore + _movement.outAmount, _movement.inAmount);
         } else {
-            _checkDao(_index, _plan.inToken, _inBefore, _plan.inAmount);
-            if (_plan.outAmount != 0) _checkDao(_index, _plan.outToken, _outBefore + _plan.outAmount, 0);
+            _checkDao(_index, _movement.inToken, _inBefore, _movement.inAmount);
+            if (_movement.outAmount != 0) _checkDao(_index, _movement.outToken, _outBefore + _movement.outAmount, 0);
         }
     }
 
@@ -233,8 +237,8 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     // Helpers
 
-    function _childInput(Plan memory _plan, uint256 _amount) internal pure returns (Plan memory) {
-        return Plan(_plan.outToken, _amount, _plan.outToken, _amount, _plan.beneficiary);
+    function _childInput(Movement memory _movement, uint256 _amount) internal pure returns (Input memory) {
+        return Input(_movement.outToken, _amount, _movement.beneficiary);
     }
 
     /// @dev Splits `_amount` by `_weights`; the rounding remainder goes to the largest weight

@@ -8,7 +8,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 
 /// @title KeepAction
 /// @notice Leaf that leaves its whole input in the DAO, so keeping funds is an explicit choice
@@ -26,18 +26,18 @@ contract KeepAction is INodeAction, DaoAuthorizableUpgradeable {
     function budget() external pure returns (IBudget) {}
 
     /// @inheritdoc INodeAction
-    function preconditions(address, Plan calldata) external pure {}
+    function preconditions(address, Input calldata) external pure {}
 
     /// @inheritdoc INodeAction
-    function build(address, bytes calldata, Plan calldata _draft)
+    function build(address, bytes calldata, Input calldata _input)
         external
         pure
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        _plan = Plan(_draft.inToken, _draft.inAmount, _draft.inToken, 0, _draft.beneficiary);
-        return (_plan, _actions);
+        _movement = Movement(_input.token, _input.amount, _input.token, 0, _input.beneficiary);
+        return (_movement, _actions);
     }
 
     /// @inheritdoc INodeAction
-    function postconditions(address, Plan calldata) external pure returns (Action[] memory) {}
+    function postconditions(address, Movement calldata) external pure returns (Action[] memory) {}
 }

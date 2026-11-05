@@ -6,7 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
 import {INodeAction} from "../../src/interfaces/INodeAction.sol";
-import {Plan} from "../../src/lib/types.sol";
+import {Input, Movement} from "../../src/lib/types.sol";
 
 /// @notice A node action that misbehaves in one chosen way. Otherwise it passes its input through.
 contract BadAction is INodeAction {
@@ -38,37 +38,37 @@ contract BadAction is INodeAction {
 
     function budget() external pure returns (IBudget) {}
 
-    function preconditions(address, Plan calldata) external view {
+    function preconditions(address, Input calldata) external view {
         if (mode == Mode.Block) revert Blocked();
     }
 
-    function build(address, bytes calldata, Plan calldata _draft)
+    function build(address, bytes calldata, Input calldata _input)
         external
         view
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        if (mode == Mode.Skip) return (_plan, _actions);
+        if (mode == Mode.Skip) return (_movement, _actions);
 
-        _plan = _draft;
-        if (mode == Mode.TakeHalf) (_plan.inAmount, _plan.outAmount) = (_draft.inAmount / 2, _draft.inAmount / 2);
-        if (mode == Mode.Overspend) _plan.inAmount += 1;
-        if (mode == Mode.Redirect) _plan.beneficiary = THIEF;
-        if (mode == Mode.SwapInputToken) _plan.inToken = IERC20(THIEF);
-        if (mode == Mode.Lie) (_plan.outToken, _plan.outAmount) = (tokenB, 10 ether);
+        _movement = Movement(_input.token, _input.amount, _input.token, _input.amount, _input.beneficiary);
+        if (mode == Mode.TakeHalf) (_movement.inAmount, _movement.outAmount) = (_input.amount / 2, _input.amount / 2);
+        if (mode == Mode.Overspend) _movement.inAmount += 1;
+        if (mode == Mode.Redirect) _movement.beneficiary = THIEF;
+        if (mode == Mode.SwapInputToken) _movement.inToken = IERC20(THIEF);
+        if (mode == Mode.Lie) (_movement.outToken, _movement.outAmount) = (tokenB, 10 ether);
         if (mode == Mode.TargetDao || mode == Mode.TargetPlugin) {
             _actions = new Action[](1);
             _actions[0] = Action({to: mode == Mode.TargetDao ? dao : msg.sender, value: 0, data: ""});
         }
         if (mode == Mode.Drain) {
-            (_plan.inAmount, _plan.outAmount) = (_draft.inAmount / 2, 0);
+            (_movement.inAmount, _movement.outAmount) = (_input.amount / 2, 0);
             _actions = new Action[](1);
             _actions[0] = Action({
-                to: address(_draft.inToken), value: 0, data: abi.encodeCall(IERC20.transfer, (THIEF, _draft.inAmount))
+                to: address(_input.token), value: 0, data: abi.encodeCall(IERC20.transfer, (THIEF, _input.amount))
             });
         }
     }
 
-    function postconditions(address, Plan calldata) external pure returns (Action[] memory) {}
+    function postconditions(address, Movement calldata) external pure returns (Action[] memory) {}
 }
 
 /// @notice USDT-family failure mode: after `successfulTransfers` transfers, `transfer` returns

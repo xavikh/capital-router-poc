@@ -9,7 +9,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 import {NATIVE} from "../lib/tokens.sol";
 
 /// @title BurnAction
@@ -33,23 +33,22 @@ contract BurnAction is INodeAction, DaoAuthorizableUpgradeable {
     function budget() external pure returns (IBudget) {}
 
     /// @inheritdoc INodeAction
-    function preconditions(address, Plan calldata _draft) external pure {
-        if (_draft.inToken == NATIVE) revert CannotBurnNative();
+    function preconditions(address, Input calldata _input) external pure {
+        if (_input.token == NATIVE) revert CannotBurnNative();
     }
 
     /// @inheritdoc INodeAction
-    function build(address, bytes calldata, Plan calldata _draft)
+    function build(address, bytes calldata, Input calldata _input)
         external
         pure
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
-        _plan = Plan(_draft.inToken, _draft.inAmount, _draft.inToken, 0, _draft.beneficiary);
+        _movement = Movement(_input.token, _input.amount, _input.token, 0, _input.beneficiary);
         _actions = new Action[](1);
-        _actions[0] = Action({
-            to: address(_draft.inToken), value: 0, data: abi.encodeCall(ERC20Burnable.burn, (_draft.inAmount))
-        });
+        _actions[0] =
+            Action({to: address(_input.token), value: 0, data: abi.encodeCall(ERC20Burnable.burn, (_input.amount))});
     }
 
     /// @inheritdoc INodeAction
-    function postconditions(address, Plan calldata) external pure returns (Action[] memory) {}
+    function postconditions(address, Movement calldata) external pure returns (Action[] memory) {}
 }

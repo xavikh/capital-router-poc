@@ -6,7 +6,7 @@ import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
-import {Plan} from "../src/lib/types.sol";
+import {Movement} from "../src/lib/types.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 
@@ -43,8 +43,8 @@ contract FundedStreamBudgetTest is Fixture {
     }
 
     function test_CommitActionsWriteCheckpoint() public view {
-        Plan memory _plan;
-        Action[] memory _actions = budget.commitActions(_plan);
+        Movement memory _root;
+        Action[] memory _actions = budget.commitActions(_root);
 
         assertEq(_actions.length, 1);
         assertEq(_actions[0].to, address(budget));

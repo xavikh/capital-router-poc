@@ -12,7 +12,7 @@ import {TransferBase} from "../src/actions/TransferBase.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
-import {Plan} from "../src/lib/types.sol";
+import {Input, Movement} from "../src/lib/types.sol";
 import {NATIVE} from "../src/lib/tokens.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {FalseReturnToken} from "./mocks/BadComponents.sol";
@@ -38,9 +38,9 @@ contract LeafActionsTest is Fixture {
 
     function test_TransferPostconditionMeasuresTheRecipient() public {
         TransferAction _transfer = _deployTransfer(alice);
-        Plan memory _plan = Plan(tokenA, 7 ether, tokenA, 0, address(0));
+        Movement memory _movement = Movement(tokenA, 7 ether, tokenA, 0, address(0));
 
-        Action[] memory _checks = _transfer.postconditions(address(0), _plan);
+        Action[] memory _checks = _transfer.postconditions(address(0), _movement);
 
         assertEq(_checks.length, 1);
         assertEq(_checks[0].to, address(_transfer));
@@ -87,7 +87,7 @@ contract LeafActionsTest is Fixture {
 
     function test_RevertWhen_BurningNativeEth() public {
         vm.expectRevert(BurnAction.CannotBurnNative.selector);
-        burn.preconditions(address(0), Plan(NATIVE, 1 ether, NATIVE, 0, address(0)));
+        burn.preconditions(address(0), Input(NATIVE, 1 ether, address(0)));
     }
 
     // Keep
@@ -142,8 +142,8 @@ contract BalanceBudgetTest is Fixture {
     }
 
     function test_CommitsNothing() public {
-        Plan memory _plan;
-        assertEq(_deployBalanceBudget(tokenA).commitActions(_plan).length, 0);
+        Movement memory _root;
+        assertEq(_deployBalanceBudget(tokenA).commitActions(_root).length, 0);
     }
 
     function test_RevertWhen_TokenHasNoCode() public {

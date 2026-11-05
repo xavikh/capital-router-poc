@@ -43,21 +43,22 @@ commit  writeCheckpoint                   once, after the whole tree
 ### Interfaces
 
 ```solidity
-struct Plan { IERC20 inToken; uint256 inAmount; IERC20 outToken; uint256 outAmount; address beneficiary; }
+struct Input { IERC20 token; uint256 amount; address beneficiary; }   // what a node receives
+struct Movement { IERC20 inToken; uint256 inAmount; IERC20 outToken; uint256 outAmount; address beneficiary; }   // what it spends and produces
 struct Node { INodeAction action; uint32[] children; uint32[] weights; }
 
 interface IBudget {
     function token() external view returns (IERC20);
     function available() external view returns (uint256);
-    function commitActions(Plan calldata root) external view returns (Action[] memory);  // once, at the end
+    function commitActions(Movement calldata root) external view returns (Action[] memory);  // once, at the end
 }
 
 interface INodeAction {
     function budget() external view returns (IBudget);   // bound budget (root only), or address(0)
-    function preconditions(address caller, Plan calldata draft) external view;   // revert = blocked
-    function build(address caller, bytes calldata data, Plan calldata draft)
-        external view returns (Plan memory plan, Action[] memory actions);
-    function postconditions(address caller, Plan calldata plan) external view returns (Action[] memory);
+    function preconditions(address caller, Input calldata input) external view;   // revert = blocked
+    function build(address caller, bytes calldata data, Input calldata input)
+        external view returns (Movement memory movement, Action[] memory actions);
+    function postconditions(address caller, Movement calldata movement) external view returns (Action[] memory);
 }
 ```
 
@@ -73,19 +74,19 @@ interface INodeAction {
 ```
 trigger(bytes[] data)                                   nonReentrant, whenNotPaused, auth(TRIGGER)
   run(node 0, input = { budget.token(), budget.available() })
-  dao.execute(budget.commitActions(root plan))          once, after the whole tree
+  dao.execute(budget.commitActions(root movement))      once, after the whole tree
 
 run(node, input)                                        depth first
   input == 0                     → revert EmptyInput
-  no action (branch)             → plan = input
+  no action (branch)             → movement = input, passed on
   otherwise
-    action.preconditions → action.build → plan
-    root: 0 < plan.in ≤ input; others: plan.in == input        else revert
+    action.preconditions(input) → action.build(input) → movement
+    root: 0 < movement.in ≤ input; others: movement.in == input        else revert
     same input token; leaves output 0; beneficiary not changed  else revert
     acts = build actions + action.postconditions
     reject acts targeting the DAO or the plugin
     snapshot DAO balances → dao.execute(acts) → verify DAO balances
-  children get plan.out (split by weights for a branch)
+  children get movement.out (split by weights for a branch)
 ```
 
 ### Balance checks (after every node)
@@ -118,7 +119,7 @@ Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not s
 2. **Every node must succeed.** The root takes a non-zero amount, up to the budget; every other node takes exactly its input; leaves output nothing. A trigger with nothing to do reverts.
 3. **The budget is read once and committed once, after the whole tree,** so a stream checkpoint sees the final balance.
 4. **Planning is view-only.** Every state change is a DAO action; each node is planned right before its own `execute`.
-5. **Actions declare their output at plan time.** Branch weights divide the declared output. Swap surplus above the declared minimum stays in the DAO.
+5. **Actions declare their output in `build`.** Branch weights divide the declared output. Swap surplus above the declared minimum stays in the DAO.
 6. **A beneficiary, once set, can't change.** Only `MerkleClaimAction` sets one; it flows down every branch.
 7. **Bound actions (OpenFill, MerkleClaim) are only allowed at the root.**
 8. **No action may target the DAO or the plugin itself**, so no node can grant permissions, upgrade the DAO or reconfigure the flow mid-trigger. `setFlow` is also `nonReentrant`.

@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {TransferBase} from "./TransferBase.sol";
-import {Plan} from "../lib/types.sol";
 
 /// @title TransferToBeneficiaryAction
 /// @notice Leaf that sends its whole input to the flow's beneficiary (set by a claim at the root)
@@ -20,8 +19,8 @@ contract TransferToBeneficiaryAction is TransferBase {
         __DaoAuthorizableUpgradeable_init(_dao);
     }
 
-    function _recipient(Plan calldata _plan) internal pure override returns (address) {
-        if (_plan.beneficiary == address(0)) revert NoBeneficiary();
-        return _plan.beneficiary;
+    function _recipient(address _beneficiary) internal pure override returns (address) {
+        if (_beneficiary == address(0)) revert NoBeneficiary();
+        return _beneficiary;
     }
 }

@@ -10,7 +10,7 @@ import {
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Plan} from "../lib/types.sol";
+import {Input, Movement} from "../lib/types.sol";
 import {MANAGER_PERMISSION_ID, RECORD_CLAIM_PERMISSION_ID} from "../lib/constants.sol";
 
 /// @title MerkleClaimAction
@@ -62,14 +62,14 @@ contract MerkleClaimAction is INodeAction, Initializable, DaoAuthorizableUpgrade
     // INodeAction
 
     /// @inheritdoc INodeAction
-    function preconditions(address, Plan calldata) external view virtual {}
+    function preconditions(address, Input calldata) external view virtual {}
 
     /// @inheritdoc INodeAction
-    function build(address _caller, bytes calldata _data, Plan calldata _draft)
+    function build(address _caller, bytes calldata _data, Input calldata _input)
         external
         view
         virtual
-        returns (Plan memory _plan, Action[] memory _actions)
+        returns (Movement memory _movement, Action[] memory _actions)
     {
         (address _account, uint256 _cumulative, bytes32[] memory _proof, address _beneficiary) =
             abi.decode(_data, (address, uint256, bytes32[], address));
@@ -82,12 +82,8 @@ contract MerkleClaimAction is INodeAction, Initializable, DaoAuthorizableUpgrade
         if (_cumulative <= claimed[_account]) revert NothingToClaim();
         uint256 _owed = _cumulative - claimed[_account];
 
-        _plan = Plan({
-            inToken: _draft.inToken,
-            inAmount: _owed,
-            outToken: _draft.inToken,
-            outAmount: _owed,
-            beneficiary: _beneficiary
+        _movement = Movement({
+            inToken: _input.token, inAmount: _owed, outToken: _input.token, outAmount: _owed, beneficiary: _beneficiary
         });
 
         _actions = new Action[](1);
@@ -98,7 +94,7 @@ contract MerkleClaimAction is INodeAction, Initializable, DaoAuthorizableUpgrade
 
     /// @inheritdoc INodeAction
     /// @dev None: the plugin's balance checks verify the payout
-    function postconditions(address, Plan calldata) external view virtual returns (Action[] memory) {}
+    function postconditions(address, Movement calldata) external view virtual returns (Action[] memory) {}
 
     // Claim record
 

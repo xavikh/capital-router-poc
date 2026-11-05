@@ -9,7 +9,7 @@ import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
 import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
-import {Plan} from "../src/lib/types.sol";
+import {Input} from "../src/lib/types.sol";
 import {NATIVE} from "../src/lib/tokens.sol";
 import {Fixture} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
@@ -54,7 +54,7 @@ contract NativeEthTest is Fixture {
     function test_NativeOfferNeedsNoApproval() public {
         OpenFillAction _action = _deployAction(_deployStream(NATIVE, RATE, 0));
 
-        (, Action[] memory _actions) = _action.build(alice, "", Plan(NATIVE, 10 ether, NATIVE, 10 ether, address(0)));
+        (, Action[] memory _actions) = _action.build(alice, "", Input(NATIVE, 10 ether, address(0)));
 
         assertEq(_actions.length, 1, "callback only");
         assertEq(_actions[0].to, alice);
