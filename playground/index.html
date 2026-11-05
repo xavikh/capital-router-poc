@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Capital Pipeline Playground</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      { "imports": { "viem": "https://esm.sh/viem@2.21.55" } }
+    </script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Capital Pipeline playground</h1>
+      <p class="hint">Anvil fork of Sepolia · Aragon OSx v1.4 · transactions come from Anvil's first account</p>
+      <div id="status">Connecting to the fork…</div>
+    </header>
+    <main>
+      <section id="builder">
+        <h2>Create a recipe</h2>
+        <div id="builder-body"></div>
+      </section>
+      <section>
+        <h2>Installed flows</h2>
+        <div id="flows"></div>
+      </section>
+      <section>
+        <h2>Components</h2>
+        <p class="hint">What the registry can clone. Address inputs take an address, <code>DAO</code>, <code>PLUGIN</code>, <code>ANY</code> or <code>ref(i)</code> for the recipe's component <code>i</code>. Amounts take whole numbers or <code>10e18</code>.</p>
+        <div id="registry"></div>
+      </section>
+    </main>
+  </body>
+</html>
