@@ -1,0 +1,15 @@
+{
+  "name": "BurnAction",
+  "version": 1,
+  "description": "Leaf action. Burns its whole input with ERC20Burnable.burn. Not for native ETH.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      }
+    ]
+  }
+}

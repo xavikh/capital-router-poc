@@ -36,6 +36,8 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/setup/CapitalPipelinePluginSetup.sol` | Installs any flow from a recipe |
 | `script/Recipes.sol` | Recipes for buyback, Merkle claim and payroll |
 | `script/Deploy.s.sol` | Deploys every implementation, the registry and the setup |
+| `metadata/components/` | One JSON per component: name, description, `initialize` inputs |
+| `metadata/uris.json` | The IPFS link of each metadata file, read by the deploy script |
 
 ## Permissions
 
@@ -61,6 +63,11 @@ forge test
 Never set `via_ir = true`; fix stack-too-deep errors by restructuring the code.
 
 ## Deploy
+
+1. Upload each file in `metadata/components/` to IPFS (any pinning service).
+2. Put its `ipfs://...` link under the component's name in `metadata/uris.json`. The script refuses
+   to deploy while a link is empty, because registry entries can't be changed later.
+3. Run:
 
 ```shell
 MANAGING_DAO=0x... forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast

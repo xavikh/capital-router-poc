@@ -1,0 +1,36 @@
+{
+  "name": "FundedStreamBudget",
+  "version": 1,
+  "description": "Budget. Streams a token: the available amount grows each epoch, capped by what the DAO holds. Commits a checkpoint after each flow, so it needs CHECKPOINT_PERMISSION_ID for the DAO (and for an OpenFill bound to it).",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "contract IERC20",
+        "description": "The token streamed. 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH."
+      },
+      {
+        "name": "amountPerEpoch",
+        "type": "uint256",
+        "description": "How much the available amount grows per epoch."
+      },
+      {
+        "name": "maxBudget",
+        "type": "uint256",
+        "description": "Maximum available amount at any time. 0 for no cap."
+      },
+      {
+        "name": "epochInterval",
+        "type": "uint256",
+        "description": "Epoch duration in seconds."
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "FundedStreamBudget": "",
+  "BalanceBudget": "",
+  "OpenFillAction": "",
+  "MerkleClaimAction": "",
+  "TransferAction": "",
+  "TransferToBeneficiaryAction": "",
+  "BurnAction": "",
+  "KeepAction": ""
+}

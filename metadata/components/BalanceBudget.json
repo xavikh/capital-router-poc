@@ -1,0 +1,21 @@
+{
+  "name": "BalanceBudget",
+  "version": 1,
+  "description": "Budget. Makes the DAO's whole balance of a token available. Commits nothing.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "contract IERC20",
+        "description": "The token. 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH."
+      }
+    ]
+  }
+}

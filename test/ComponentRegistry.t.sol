@@ -6,7 +6,7 @@ import {ComponentRegistry} from "../src/registry/ComponentRegistry.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
 import {Deploy} from "../script/Deploy.s.sol";
 import {Recipes} from "../script/Recipes.sol";
-import {Fixture} from "./helpers/Fixture.sol";
+import {Fixture, METADATA_URIS} from "./helpers/Fixture.sol";
 
 contract ComponentRegistryTest is Fixture {
     ComponentRegistry internal registry;
@@ -14,7 +14,7 @@ contract ComponentRegistryTest is Fixture {
 
     function setUp() public override {
         super.setUp();
-        (registry,) = new Deploy().deploy(dao);
+        (registry,) = new Deploy().deploy(dao, METADATA_URIS);
         newKeep = address(new KeepAction());
         dao.grant(address(registry), manager, registry.REGISTER_PERMISSION_ID());
     }

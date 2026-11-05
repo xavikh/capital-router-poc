@@ -1,0 +1,20 @@
+{
+  "name": "TransferAction",
+  "version": 1,
+  "description": "Leaf action. Sends its whole input to a fixed recipient and checks it arrived.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "description": "The recipient."
+      }
+    ]
+  }
+}

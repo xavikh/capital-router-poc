@@ -1,0 +1,15 @@
+{
+  "name": "KeepAction",
+  "version": 1,
+  "description": "Leaf action. Leaves its whole input in the DAO.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      }
+    ]
+  }
+}

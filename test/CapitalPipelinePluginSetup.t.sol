@@ -20,7 +20,7 @@ import {
 import {DAO_REF, PLUGIN_REF, ref} from "../src/lib/placeholders.sol";
 import {Deploy} from "../script/Deploy.s.sol";
 import {Recipes} from "../script/Recipes.sol";
-import {Fixture} from "./helpers/Fixture.sol";
+import {Fixture, METADATA_URIS} from "./helpers/Fixture.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
 
 contract CapitalPipelinePluginSetupTest is Fixture {
@@ -29,7 +29,7 @@ contract CapitalPipelinePluginSetupTest is Fixture {
 
     function setUp() public override {
         super.setUp();
-        (registry, setup) = new Deploy().deploy(dao);
+        (registry, setup) = new Deploy().deploy(dao, METADATA_URIS);
     }
 
     // =========================================================================================

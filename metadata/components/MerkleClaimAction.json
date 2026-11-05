@@ -1,0 +1,26 @@
+{
+  "name": "MerkleClaimAction",
+  "version": 1,
+  "description": "Root action. Pays cumulative Merkle allocations: each account claims what it is owed and may name another beneficiary. Records claims through the DAO, so it needs RECORD_CLAIM_PERMISSION_ID for the DAO.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      },
+      {
+        "name": "budget",
+        "type": "address",
+        "internalType": "contract IBudget",
+        "description": "The flow's budget. In a recipe: ref(i) of the budget component."
+      },
+      {
+        "name": "root",
+        "type": "bytes32",
+        "description": "Merkle root of (account, cumulative amount) leaves, OpenZeppelin StandardMerkleTree format."
+      }
+    ]
+  }
+}

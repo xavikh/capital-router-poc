@@ -1,0 +1,15 @@
+{
+  "name": "TransferToBeneficiaryAction",
+  "version": 1,
+  "description": "Leaf action. Sends its whole input to the flow's beneficiary, set by a Merkle claim at the root.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "OpenFillAction",
+  "version": 1,
+  "description": "Root action. Dutch-auction swap of the budget's token: any filler pays the demanded amount and receives the offer. Restarts its budget when the manager changes the price, so it needs CHECKPOINT_PERMISSION_ID on that budget.",
+  "initialize": {
+    "inputs": [
+      {
+        "name": "dao",
+        "type": "address",
+        "internalType": "contract IDAO",
+        "description": "The installing DAO. In a recipe: DAO_REF."
+      },
+      {
+        "name": "budget",
+        "type": "address",
+        "internalType": "contract ICheckpointedBudget",
+        "description": "The flow's stream budget. In a recipe: ref(i) of the budget component."
+      },
+      {
+        "name": "demandedToken",
+        "type": "address",
+        "internalType": "contract IERC20",
+        "description": "The token the DAO must receive. 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native ETH."
+      },
+      {
+        "name": "demandPerFill",
+        "type": "uint256",
+        "description": "How much of the demanded token must come back per fill."
+      },
+      {
+        "name": "minDemandedPerOffered",
+        "type": "uint256",
+        "description": "The lowest acceptable price, demanded per offered, 1e18-scaled."
+      }
+    ]
+  }
+}

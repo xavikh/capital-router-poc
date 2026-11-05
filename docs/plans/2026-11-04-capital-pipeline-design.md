@@ -156,6 +156,7 @@ One per chain, maintained by a managing DAO.
 
 - Maps ids (`"OpenFillAction@1"`) to an implementation and its metadata. Entries are write-once, so an id always means the same code and a recipe can't change under a vote.
 - The first batch is registered at deployment; later entries need `REGISTER_PERMISSION_ID` on the managing DAO.
+- Metadata is an IPFS link, as in Aragon plugin repos, to a JSON in `metadata/components/`: `name`, `version`, `description` and `initialize.inputs` (ABI parameters with a `description` each), so UIs can show a recipe component as named fields. A test checks every file's input types against its contract's `initialize`, and the deploy script refuses an empty link.
 
 ### `CapitalPipelinePluginSetup`
 
@@ -213,12 +214,12 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 - **Plugin:** tree validation, flows (swap and pay two recipients, buyback with burn and fee, action-less branches, keep), every-node-must-succeed rules, guards (DAO and plugin targets, reentrancy), balance checks (lying and overspending actions). The balance and whole-input tests fail when those checks are removed.
 - **Components:** budgets, OpenFill, Merkle (account-only, redirect, new rounds, insolvency, empty DAO, claim then swap, claim with a fee branch, claim stays open when a later node can't run), leaf actions (including silent transfer failures, also to a recipient listed twice), native ETH.
 - **Invariant:** across random fills, deposits, syncs and tweaks, the DAO's pre-existing B is never spent and proceeds are split exactly.
-- **Installation:** every recipe installed through the deploy script and run end to end; fresh clones per install; recipe grants applied and revoked exactly; rejected recipes (unregistered id, unknown reference, grants on the DAO or outside contracts, `CONFIGURE`); registry write-once and permissioned. The DAO-binding, grant and registry tests fail when those checks are removed.
+- **Installation:** every recipe installed through the deploy script and run end to end; fresh clones per install; recipe grants applied and revoked exactly; rejected recipes (unregistered id, unknown reference, grants on the DAO or outside contracts, `CONFIGURE`); registry write-once and permissioned; metadata files match their initializers and every component is registered with its link. The DAO-binding, grant and registry tests fail when those checks are removed.
 
 ## Future work
 
 - Relayed (gasless) claims, with a signature from the account over the beneficiary and every node's data.
 - Pulling OpenFill payments from the filler (`transferFrom`) to remove the inflow constraint.
 - Publishing the setup to an Aragon plugin repo on each network, with build metadata.
-- Registry metadata (names, initializer ABIs) so UIs can show recipes as named fields.
+- A script that uploads the metadata files to IPFS and fills `metadata/uris.json` (needed for plugin repo publishing too).
 - Uniswap, CowSwap and oracle-priced swap actions (working versions exist in the coverage POC).
