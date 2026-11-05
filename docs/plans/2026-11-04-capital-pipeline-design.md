@@ -189,7 +189,7 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 | `RECORD_CLAIM_PERMISSION_ID` | `MerkleClaimAction` | DAO | recipe |
 | `REGISTER_PERMISSION_ID` | registry | whoever the managing DAO picks | managing DAO |
 
-`script/Recipes.sol` builds the common flows (buyback, Merkle claim, payroll). `script/Deploy.s.sol` deploys every implementation, the registry and the setup.
+`script/Recipes.sol` builds the common flows (buy and burn, buyback with a fee, Merkle claim, payroll). `script/Deploy.s.sol` deploys every implementation, the registry and the setup.
 
 ## Failure handling
 

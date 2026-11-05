@@ -36,6 +36,17 @@ contract CapitalPipelinePluginSetupTest is Fixture {
     // Recipes
     // =========================================================================================
 
+    function test_BuyAndBurnBurnsEverything() public {
+        (CapitalPipelinePlugin _plugin,) = _install(Recipes.buyAndBurn(manager, _stream(), _swap()));
+        MockFiller _filler = _newFiller(_plugin);
+        uint256 _supply = tokenB.totalSupply();
+
+        _filler.fill("");
+
+        assertEq(tokenB.totalSupply(), _supply - DEMAND);
+        assertEq(tokenB.balanceOf(address(dao)), DAO_B);
+    }
+
     function test_BuybackBurnsAndPaysTheFee() public {
         (CapitalPipelinePlugin _plugin,) = _install(_buyback());
         MockFiller _filler = _newFiller(_plugin);

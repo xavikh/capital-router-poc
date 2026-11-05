@@ -51,6 +51,26 @@ library Recipes {
         uint256 minDemandedPerOffered;
     }
 
+    /// @notice Stream → OpenFill → burn all the proceeds.
+    ///         Components: 0 budget, 1 OpenFill, 2 Burn.
+    function buyAndBurn(address _manager, Stream memory _stream, Swap memory _swap)
+        internal
+        pure
+        returns (CapitalPipelinePluginSetup.InstallParams memory _params)
+    {
+        _params.components = new CapitalPipelinePluginSetup.Component[](3);
+        _params.components[0] = _streamBudget(_stream);
+        _params.components[1] = _openFill(_swap);
+        _params.components[2] = _burn();
+
+        _params.budget = IBudget(ref(0));
+        _params.nodes = new Node[](2);
+        _params.nodes[0] = _then(1, 1);
+        _params.nodes[1] = _leaf(2);
+
+        _params.grants = _swapGrants(_manager);
+    }
+
     /// @notice Stream → OpenFill → burn the proceeds, except `_feeWeight` (of RATIO_BASE) to `_fee`.
     ///         Components: 0 budget, 1 OpenFill, 2 Burn, 3 Transfer.
     function buyback(address _manager, Stream memory _stream, Swap memory _swap, address _fee, uint32 _feeWeight)
@@ -61,7 +81,7 @@ library Recipes {
         _params.components = new CapitalPipelinePluginSetup.Component[](4);
         _params.components[0] = _streamBudget(_stream);
         _params.components[1] = _openFill(_swap);
-        _params.components[2] = _component(BURN, abi.encodeCall(BurnAction.initialize, (IDAO(DAO_REF))));
+        _params.components[2] = _burn();
         _params.components[3] = _transfer(_fee);
 
         _params.budget = IBudget(ref(0));
@@ -74,13 +94,7 @@ library Recipes {
         _params.nodes[1] = _leaf(2);
         _params.nodes[2] = _leaf(3);
 
-        _params.grants = new CapitalPipelinePluginSetup.Grant[](6);
-        _params.grants[0] = _grant(PLUGIN_REF, ANY_ADDR, TRIGGER_PERMISSION_ID);
-        _params.grants[1] = _grant(PLUGIN_REF, _manager, MANAGER_PERMISSION_ID);
-        _params.grants[2] = _grant(ref(0), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[3] = _grant(ref(1), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[4] = _grant(ref(0), DAO_REF, CHECKPOINT_PERMISSION_ID);
-        _params.grants[5] = _grant(ref(0), ref(1), CHECKPOINT_PERMISSION_ID);
+        _params.grants = _swapGrants(_manager);
     }
 
     /// @notice The DAO's balance of `_token` → Merkle claim → pay the beneficiary.
@@ -169,6 +183,10 @@ library Recipes {
         );
     }
 
+    function _burn() private pure returns (CapitalPipelinePluginSetup.Component memory) {
+        return _component(BURN, abi.encodeCall(BurnAction.initialize, (IDAO(DAO_REF))));
+    }
+
     function _transfer(address _to) private pure returns (CapitalPipelinePluginSetup.Component memory) {
         return _component(TRANSFER, abi.encodeCall(TransferAction.initialize, (IDAO(DAO_REF), _to)));
     }
@@ -191,6 +209,17 @@ library Recipes {
         _node.action = INodeAction(ref(_index));
         _node.children = new uint32[](1);
         _node.children[0] = _child;
+    }
+
+    /// @dev For flows of a stream budget (component 0) and an OpenFill (component 1) at the root
+    function _swapGrants(address _manager) private pure returns (CapitalPipelinePluginSetup.Grant[] memory _grants) {
+        _grants = new CapitalPipelinePluginSetup.Grant[](6);
+        _grants[0] = _grant(PLUGIN_REF, ANY_ADDR, TRIGGER_PERMISSION_ID);
+        _grants[1] = _grant(PLUGIN_REF, _manager, MANAGER_PERMISSION_ID);
+        _grants[2] = _grant(ref(0), _manager, MANAGER_PERMISSION_ID);
+        _grants[3] = _grant(ref(1), _manager, MANAGER_PERMISSION_ID);
+        _grants[4] = _grant(ref(0), DAO_REF, CHECKPOINT_PERMISSION_ID);
+        _grants[5] = _grant(ref(0), ref(1), CHECKPOINT_PERMISSION_ID);
     }
 
     function _grant(address _where, address _who, bytes32 _id)

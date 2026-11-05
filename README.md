@@ -35,7 +35,7 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/actions/KeepAction.sol` | Leaf: leaves its input in the DAO |
 | `src/registry/ComponentRegistry.sol` | Write-once ids for the implementations recipes can clone |
 | `src/setup/CapitalPipelinePluginSetup.sol` | Installs any flow from a recipe |
-| `script/Recipes.sol` | Recipes for buyback, Merkle claim and payroll |
+| `script/Recipes.sol` | Recipes for buy and burn, buyback with a fee, Merkle claim and payroll |
 | `script/Deploy.s.sol` | Deploys every implementation, the registry and the setup |
 | `metadata/components/` | One JSON per component: name, description, `initialize` inputs |
 | `metadata/uris.json` | The IPFS link of each metadata file, read by the deploy script |
