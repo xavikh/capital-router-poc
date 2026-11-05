@@ -8,18 +8,15 @@ import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/ProxyLib.sol";
 import {FundedStreamBudget} from "../../src/budgets/FundedStreamBudget.sol";
 import {BalanceBudget} from "../../src/budgets/BalanceBudget.sol";
-import {RatioSplitter} from "../../src/splitters/RatioSplitter.sol";
 import {OpenFillAction} from "../../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../../src/actions/MerkleClaimAction.sol";
 import {TransferAction} from "../../src/actions/TransferAction.sol";
 import {TransferToBeneficiaryAction} from "../../src/actions/TransferToBeneficiaryAction.sol";
 import {BurnAction} from "../../src/actions/BurnAction.sol";
 import {KeepAction} from "../../src/actions/KeepAction.sol";
-import {SplitTransferAction} from "../../src/actions/SplitTransferAction.sol";
 import {CapitalPipelinePlugin} from "../../src/CapitalPipelinePlugin.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
 import {INodeAction} from "../../src/interfaces/INodeAction.sol";
-import {ISplitter} from "../../src/interfaces/ISplitter.sol";
 import {Node} from "../../src/lib/types.sol";
 import {
     MANAGER_PERMISSION_ID,
@@ -116,33 +113,6 @@ abstract contract Fixture is Test {
         );
     }
 
-    // Splitters (used by SplitTransferAction)
-
-    /// @dev 95% to the burn address, 5% to the fee address
-    function _deploySplitter() internal returns (RatioSplitter) {
-        return _deployRatio(BURN, 950_000, fee, 50_000);
-    }
-
-    function _deployRatio(address _a, uint32 _ratioA, address _b, uint32 _ratioB) internal returns (RatioSplitter) {
-        address[] memory _recipients = new address[](2);
-        (_recipients[0], _recipients[1]) = (_a, _b);
-        uint32[] memory _ratios = new uint32[](2);
-        (_ratios[0], _ratios[1]) = (_ratioA, _ratioB);
-        return _deployRatio(_recipients, _ratios);
-    }
-
-    function _deployRatio(address[] memory _recipients, uint32[] memory _ratios)
-        internal
-        returns (RatioSplitter _splitter)
-    {
-        _splitter = RatioSplitter(
-            ProxyLib.deployMinimalProxy(
-                address(new RatioSplitter()), abi.encodeCall(RatioSplitter.initialize, (dao, _recipients, _ratios))
-            )
-        );
-        dao.grant(address(_splitter), manager, MANAGER_PERMISSION_ID);
-    }
-
     // Actions
 
     /// @dev Demands token B. Bound to `_budget`, which it may restart when its price terms change.
@@ -176,14 +146,6 @@ abstract contract Fixture is Test {
         return TransferAction(
             ProxyLib.deployMinimalProxy(
                 address(new TransferAction()), abi.encodeCall(TransferAction.initialize, (dao, _to))
-            )
-        );
-    }
-
-    function _deploySplitTransfer(ISplitter _splitter) internal returns (SplitTransferAction) {
-        return SplitTransferAction(
-            ProxyLib.deployMinimalProxy(
-                address(new SplitTransferAction()), abi.encodeCall(SplitTransferAction.initialize, (dao, _splitter))
             )
         );
     }
@@ -254,6 +216,11 @@ abstract contract Fixture is Test {
     function _chain(INodeAction _a, INodeAction _b, INodeAction _c) internal pure returns (Node[] memory _tree) {
         _tree = new Node[](3);
         (_tree[0], _tree[1], _tree[2]) = (_then(_a, 1), _then(_b, 2), _leaf(_c));
+    }
+
+    /// @dev `_root` paying 95% to the burn address and 5% to the fee address
+    function _splitToBurnAndFee(INodeAction _root) internal returns (Node[] memory) {
+        return _fork(_root, 950_000, _deployTransfer(BURN), 50_000, _deployTransfer(fee));
     }
 
     /// @dev `_root` split by weight between two leaves

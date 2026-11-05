@@ -12,13 +12,10 @@ import {TransferBase} from "../src/actions/TransferBase.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
-import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
-import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
-import {ISplitter} from "../src/interfaces/ISplitter.sol";
 import {Plan} from "../src/lib/types.sol";
 import {NATIVE} from "../src/lib/tokens.sol";
 import {Fixture} from "./helpers/Fixture.sol";
-import {OverAllocatingSplitter, DuplicateRecipientSplitter, FalseReturnToken} from "./mocks/BadComponents.sol";
+import {FalseReturnToken} from "./mocks/BadComponents.sol";
 
 contract LeafActionsTest is Fixture {
     BalanceBudget internal budget;
@@ -103,56 +100,21 @@ contract LeafActionsTest is Fixture {
         assertEq(tokenA.balanceOf(address(dao)), DAO_A);
     }
 
-    // Split transfer
-
-    function test_SplitTransferPaysEachRecipient() public {
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(budget, _one(_deploySplitTransfer(_deployRatio(alice, 700_000, bob, 300_000))));
-
-        _plugin.trigger(noData);
-
-        assertEq(tokenA.balanceOf(alice), 70 ether);
-        assertEq(tokenA.balanceOf(bob), 30 ether);
-    }
+    // Branches of transfers
 
     /// capital-router checks each transfer against a snapshot taken before any of them, so a
-    /// recipient listed twice can miss a silent failure. Here expectations add up per recipient.
+    /// recipient listed twice can miss a silent failure. Here every leaf checks its own receipt.
     function test_RevertWhen_ARepeatedRecipientMissesATransfer() public {
         FalseReturnToken _token = new FalseReturnToken(1); // the second transfer silently fails
         _token.mint(address(dao), 100 ether);
         CapitalPipelinePlugin _plugin = _deployPlugin(
             _deployBalanceBudget(IERC20(address(_token))),
-            _one(_deploySplitTransfer(new DuplicateRecipientSplitter(address(dao), alice)))
+            _fork(NO_ACTION, 500_000, _deployTransfer(alice), 500_000, _deployTransfer(alice))
         );
 
-        // Actions 0 and 1 are the transfers, action 2 the postcondition (alice expected 100, has 50)
-        vm.expectRevert(abi.encodeWithSelector(DAO.ActionFailed.selector, 2));
+        // In the second leaf, action 0 is the transfer (returns false), action 1 the postcondition
+        vm.expectRevert(abi.encodeWithSelector(DAO.ActionFailed.selector, 1));
         _plugin.trigger(noData);
-    }
-
-    function test_RevertWhen_TheSplitterAllocatesTooMuch() public {
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(budget, _one(_deploySplitTransfer(new OverAllocatingSplitter(address(dao)))));
-
-        vm.expectRevert(abi.encodeWithSelector(SplitTransferAction.AllocationExceedsInput.selector, DAO_A + 1, DAO_A));
-        _plugin.trigger(noData);
-    }
-
-    function test_RevertWhen_SplitterIsUnset() public {
-        SplitTransferAction _split =
-            SplitTransferAction(ProxyLib.deployMinimalProxy(address(new SplitTransferAction()), ""));
-
-        vm.expectRevert(SplitTransferAction.NoSplitter.selector);
-        _split.initialize(dao, ISplitter(address(0)));
-    }
-
-    function test_RevertWhen_TheSplitterIsAnImplementation() public {
-        SplitTransferAction _split =
-            SplitTransferAction(ProxyLib.deployMinimalProxy(address(new SplitTransferAction()), ""));
-        RatioSplitter _implementation = new RatioSplitter();
-
-        vm.expectRevert(SplitTransferAction.ForeignSplitter.selector);
-        _split.initialize(dao, _implementation);
     }
 
     // Implementations

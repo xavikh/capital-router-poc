@@ -38,8 +38,7 @@ contract NativeEthTest is Fixture {
 
     function test_StreamedEthIsSoldForTokens() public {
         FundedStreamBudget _budget = _deployStream(NATIVE, RATE, 0);
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(_budget, _chain(_deployAction(_budget), _deploySplitTransfer(_deploySplitter())));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _splitToBurnAndFee(_deployAction(_budget)));
         MockFiller _filler = new MockFiller(_plugin);
         tokenB.mint(address(_filler), DEMAND);
         vm.warp(block.timestamp + EPOCH);
@@ -64,8 +63,7 @@ contract NativeEthTest is Fixture {
 
     function test_TokensAreSoldForEth() public {
         FundedStreamBudget _budget = _deployBudget(RATE, 0); // token A
-        CapitalPipelinePlugin _plugin =
-            _deployPlugin(_budget, _chain(_deployOpenFill(_budget, NATIVE), _deploySplitTransfer(_deploySplitter())));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _splitToBurnAndFee(_deployOpenFill(_budget, NATIVE)));
         MockFiller _filler = new MockFiller(_plugin);
         vm.deal(address(_filler), DEMAND);
         vm.warp(block.timestamp + EPOCH);

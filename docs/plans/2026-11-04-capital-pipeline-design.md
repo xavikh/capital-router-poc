@@ -17,7 +17,7 @@ One composable shape for every treasury flow: a budget feeding a tree of explici
 | Execution | Each node with an action runs in its own `dao.execute`, planned right after its parent ran. |
 | Success | Every node must succeed. Anything else reverts the whole trigger. |
 | Branches | Fixed weights stored in the tree. The DAO changes them with `setFlow`. |
-| Leaves | Explicit actions: `Transfer`, `TransferToBeneficiary`, `SplitTransfer`, `Burn`, `Keep`. |
+| Leaves | Explicit actions: `Transfer`, `TransferToBeneficiary`, `Burn`, `Keep`. A list of recipients is a branch of `Transfer` leaves. |
 | Claims | Merkle only, cumulative leaves, one claim per trigger, only the account itself can claim. |
 | Budgets | `FundedStreamBudget` for streams, `BalanceBudget` for "whatever the DAO holds". |
 | Swap pricing | AuctionFill terms (flat demand + minimum price) inside `OpenFillAction`. |
@@ -45,7 +45,6 @@ commit  writeCheckpoint                   once, after the whole tree
 ```solidity
 struct Plan { IERC20 inToken; uint256 inAmount; IERC20 outToken; uint256 outAmount; address beneficiary; }
 struct Node { INodeAction action; uint32[] children; uint32[] weights; }
-struct Allocation { address recipient; uint256 amount; }
 
 interface IBudget {
     function token() external view returns (IERC20);
@@ -59,10 +58,6 @@ interface INodeAction {
     function build(address caller, bytes calldata data, Plan calldata draft)
         external view returns (Plan memory plan, Action[] memory actions);
     function postconditions(address caller, Plan calldata plan) external view returns (Action[] memory);
-}
-
-interface ISplitter {   // used by SplitTransferAction for dynamic recipient lists
-    function split(uint256 amount) external view returns (Allocation[] memory);
 }
 ```
 
@@ -107,11 +102,12 @@ budget  BalanceBudget(A)                     budget  BalanceBudget(A)
       └─ TransferToBeneficiary                  └─ 99% → Swap (A → B)
                                                          └─ TransferToBeneficiary
 
-Payroll (one execute)                        Treasury diversification
+Payroll                                      Treasury diversification
 budget  FundedStreamBudget(USDC)             budget  FundedStreamBudget(ETH)
-└─ SplitTransfer(Ratio{alice 50,             └─ OpenFill (ETH → USDC)
-     bob 30, carol 20})                         ├─ 70% → Keep
-                                                └─ 30% → Transfer(grantsSafe)
+└─ (branch, no action)                       └─ OpenFill (ETH → USDC)
+   ├─ 50% → Transfer(alice)                     ├─ 70% → Keep
+   ├─ 30% → Transfer(bob)                       └─ 30% → Transfer(grantsSafe)
+   └─ 20% → Transfer(carol)
 ```
 
 Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not summing to 100% (`InvalidWeights`), an action-less leaf (`MissingAction`), a leaf that outputs something (`LeafLeftOutput` at trigger), a node that takes part of its input (`NodeIncomplete` at trigger).
@@ -127,7 +123,7 @@ Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not s
 7. **Bound actions (OpenFill, MerkleClaim) are only allowed at the root.**
 8. **No action may target the DAO or the plugin itself**, so no node can grant permissions, upgrade the DAO or reconfigure the flow mid-trigger. `setFlow` is also `nonReentrant`.
 9. **A parameter change never alters what has already accrued.** Stream setters sync first; price setters restart the auction.
-10. **Every component belongs to the plugin's DAO.** The plugin rejects a budget or action whose `dao()` isn't its own, so an implementation (bound to no DAO) or another DAO's component can never run in a flow. `SplitTransferAction` applies the same rule to its splitter.
+10. **Every component belongs to the plugin's DAO.** The plugin rejects a budget or action whose `dao()` isn't its own, so an implementation (bound to no DAO) or another DAO's component can never run in a flow.
 
 ## Components
 
@@ -151,13 +147,8 @@ Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not s
 | `MerkleClaimAction` | root, bound | Cumulative Merkle claim of `(account, cumulative)` leaves (OpenZeppelin StandardMerkleTree format). Only the account can claim; it may name another beneficiary (not the DAO). Outputs only what's owed. `recordClaim` needs `RECORD_CLAIM_PERMISSION_ID` (granted to the DAO); `setRoot` needs `MANAGER_PERMISSION_ID`. |
 | `TransferAction` | leaf | Sends its input to a fixed recipient; postcondition checks receipt. |
 | `TransferToBeneficiaryAction` | leaf | Sends its input to the flow's beneficiary. |
-| `SplitTransferAction` | leaf | Pays a dynamic list from an `ISplitter`; postcondition checks receipts summed per recipient. Dust stays in the DAO. |
 | `BurnAction` | leaf | `ERC20Burnable.burn` of its input. |
 | `KeepAction` | leaf | Leaves its input in the DAO. |
-
-### Splitters
-
-- `RatioSplitter`: fixed ratios, remainder to the largest share; recipients tunable by the manager.
 
 ### `ComponentRegistry`
 
@@ -194,7 +185,7 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 | `RECORD_CLAIM_PERMISSION_ID` | `MerkleClaimAction` | DAO | recipe |
 | `REGISTER_PERMISSION_ID` | registry | whoever the managing DAO picks | managing DAO |
 
-`script/Recipes.sol` builds the common flows (swap and split, buyback, Merkle claim, payroll). `script/Deploy.s.sol` deploys every implementation, the registry and the setup.
+`script/Recipes.sol` builds the common flows (buyback, Merkle claim, payroll). `script/Deploy.s.sol` deploys every implementation, the registry and the setup.
 
 ## Failure handling
 
@@ -210,15 +201,17 @@ Recipes name contracts that don't exist yet with placeholders: `DAO_REF`, `PLUGI
 - An ETH recipient without `receive()` reverts the whole flow.
 - A trigger with nothing to do reverts (empty budget, closed gate), so keepers and fillers should simulate first.
 - One claim per trigger, by the account itself.
-- Manager power is spend power within installed flows (prices, splitter recipients, Merkle roots).
-- Gas: one `dao.execute` per action node (a swap-and-split fill is about 565k gas).
+- Manager power is spend power within installed flows (prices, Merkle roots). Recipients and weights are DAO-only (`setFlow`).
+- Gas: one `dao.execute` per action node (a swap paying two recipients is about 585k gas).
+- At most 16 nodes, so one flow pays at most 15 recipients; longer lists go through Merkle claims.
+- A share that rounds to zero reverts the trigger (every node must run), e.g. a 5% branch of less than 20 wei.
 - 256 actions per `execute`, per node.
 - `FundedStreamBudget` freezes after deposits until someone calls `sync()`.
 
 ## Testing (Foundry)
 
-- **Plugin:** tree validation, flows (swap and split, buyback with burn and fee, action-less branches, keep), every-node-must-succeed rules, guards (DAO and plugin targets, reentrancy), balance checks (lying and overspending actions). The balance and whole-input tests fail when those checks are removed.
-- **Components:** budgets, splitters, OpenFill, Merkle (account-only, redirect, new rounds, insolvency, empty DAO, claim then swap, claim with a fee branch, claim stays open when a later node can't run), leaf actions (including silent transfer failures and repeated recipients), native ETH.
+- **Plugin:** tree validation, flows (swap and pay two recipients, buyback with burn and fee, action-less branches, keep), every-node-must-succeed rules, guards (DAO and plugin targets, reentrancy), balance checks (lying and overspending actions). The balance and whole-input tests fail when those checks are removed.
+- **Components:** budgets, OpenFill, Merkle (account-only, redirect, new rounds, insolvency, empty DAO, claim then swap, claim with a fee branch, claim stays open when a later node can't run), leaf actions (including silent transfer failures, also to a recipient listed twice), native ETH.
 - **Invariant:** across random fills, deposits, syncs and tweaks, the DAO's pre-existing B is never spent and proceeds are split exactly.
 - **Installation:** every recipe installed through the deploy script and run end to end; fresh clones per install; recipe grants applied and revoked exactly; rejected recipes (unregistered id, unknown reference, grants on the DAO or outside contracts, `CONFIGURE`); registry write-once and permissioned. The DAO-binding, grant and registry tests fail when those checks are removed.
 

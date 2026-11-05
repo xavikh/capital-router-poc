@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DAO} from "@aragon/osx/core/dao/DAO.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {DaoUnauthorized} from "@aragon/osx-commons-contracts/src/permission/auth/auth.sol";
@@ -10,13 +11,13 @@ import {FundedStreamBudget} from "../src/budgets/FundedStreamBudget.sol";
 import {BalanceBudget} from "../src/budgets/BalanceBudget.sol";
 import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
-import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
 import {IBudget} from "../src/interfaces/IBudget.sol";
 import {INodeAction} from "../src/interfaces/INodeAction.sol";
 import {Node} from "../src/lib/types.sol";
 import {CONFIGURE_PERMISSION_ID, MANAGER_PERMISSION_ID} from "../src/lib/constants.sol";
 import {Fixture} from "./helpers/Fixture.sol";
+import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockFiller} from "./mocks/MockFiller.sol";
 import {MockExchange, MockSwapAction} from "./mocks/MockSwap.sol";
 import {BadAction} from "./mocks/BadComponents.sol";
@@ -24,7 +25,6 @@ import {BadAction} from "./mocks/BadComponents.sol";
 contract CapitalPipelinePluginTest is Fixture {
     FundedStreamBudget internal budget;
     OpenFillAction internal action;
-    SplitTransferAction internal split;
     CapitalPipelinePlugin internal plugin;
     MockFiller internal filler;
 
@@ -33,8 +33,7 @@ contract CapitalPipelinePluginTest is Fixture {
         super.setUp();
         budget = _deployBudget(RATE, 0);
         action = _deployAction(budget);
-        split = _deploySplitTransfer(_deploySplitter());
-        plugin = _deployPlugin(budget, _chain(action, split));
+        plugin = _deployPlugin(budget, _splitToBurnAndFee(action));
 
         filler = new MockFiller(plugin);
         tokenB.mint(address(filler), 1_000_000 ether);
@@ -50,11 +49,11 @@ contract CapitalPipelinePluginTest is Fixture {
         Node[] memory _stored = plugin.nodes();
 
         assertEq(address(plugin.budget()), address(budget));
-        assertEq(_stored.length, 2);
+        assertEq(_stored.length, 3);
         assertEq(address(_stored[0].action), address(action));
-        assertEq(_stored[0].children[0], 1);
-        assertEq(address(_stored[1].action), address(split));
-        assertEq(_stored[1].children.length, 0);
+        assertEq(_stored[0].children[1], 2);
+        assertEq(_stored[0].weights[0], 950_000);
+        assertEq(_stored[2].children.length, 0);
     }
 
     function test_DaoReplacesTheFlow() public {
@@ -197,7 +196,7 @@ contract CapitalPipelinePluginTest is Fixture {
     function test_RevertWhen_TheRootIsBoundToAnotherBudget() public {
         _expectInitRevert(
             _deployBudget(RATE, 0),
-            _chain(action, split),
+            _chain(action, keep),
             abi.encodeWithSelector(CapitalPipelinePlugin.BudgetMismatch.selector, 0)
         );
     }
@@ -293,7 +292,7 @@ contract CapitalPipelinePluginTest is Fixture {
     }
 
     function test_RevertWhen_DataLengthMismatch() public {
-        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.DataLengthMismatch.selector, 2, 1));
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.DataLengthMismatch.selector, 3, 1));
         plugin.trigger(new bytes[](1));
     }
 
@@ -306,6 +305,19 @@ contract CapitalPipelinePluginTest is Fixture {
 
         vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.EmptyInput.selector, 0));
         filler.fillWithoutData();
+    }
+
+    /// Every node must run, so a share that rounds to zero reverts the whole trigger
+    function test_RevertWhen_AShareRoundsToZero() public {
+        ERC20Mock _dust = new ERC20Mock("Dust", "D");
+        _dust.mint(address(dao), 19); // 5% of 19 rounds to 0
+        CapitalPipelinePlugin _plugin = _deployPlugin(
+            _deployBalanceBudget(IERC20(address(_dust))),
+            _fork(NO_ACTION, 950_000, _deployTransfer(alice), 50_000, _deployTransfer(bob))
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(CapitalPipelinePlugin.EmptyInput.selector, 2));
+        _plugin.trigger(noData);
     }
 
     function test_RevertWhen_TheRootTakesNothing() public {

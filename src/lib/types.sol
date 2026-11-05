@@ -15,12 +15,6 @@ struct Plan {
     address beneficiary;
 }
 
-/// @notice An amount for one recipient, returned by splitters
-struct Allocation {
-    address recipient;
-    uint256 amount;
-}
-
 /// @notice One node of a flow tree. Node 0 is the root and receives the budget.
 /// @param action What the node does with its input. May be address(0) only on a branch (2+
 ///        children): the node then passes its input to its children unchanged.

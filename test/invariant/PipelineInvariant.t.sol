@@ -58,7 +58,9 @@ contract Handler is Test {
     }
 
     function setDemandPerFill(uint256 _demand) external {
-        uint256 _lowest = action.minDemandedPerOffered() / 1e18 + 1; // keeps maxOffered() >= 1
+        // Keeps maxOffered() >= 1, and at least 20 wei so the 5% branch is never empty
+        uint256 _lowest = action.minDemandedPerOffered() / 1e18 + 1;
+        if (_lowest < 20) _lowest = 20;
         vm.prank(manager);
         action.setDemandPerFill(bound(_demand, _lowest, 2_000_000 ether));
     }
@@ -77,7 +79,7 @@ contract PipelineInvariantTest is Fixture {
         super.setUp();
         FundedStreamBudget _budget = _deployBudget(RATE, 0);
         OpenFillAction _action = _deployAction(_budget);
-        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _chain(_action, _deploySplitTransfer(_deploySplitter())));
+        CapitalPipelinePlugin _plugin = _deployPlugin(_budget, _splitToBurnAndFee(_action));
 
         filler = new MockFiller(_plugin);
         tokenB.mint(address(filler), type(uint128).max);

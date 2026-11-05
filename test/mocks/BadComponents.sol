@@ -6,8 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {IBudget} from "../../src/interfaces/IBudget.sol";
 import {INodeAction} from "../../src/interfaces/INodeAction.sol";
-import {ISplitter} from "../../src/interfaces/ISplitter.sol";
-import {Plan, Allocation} from "../../src/lib/types.sol";
+import {Plan} from "../../src/lib/types.sol";
 
 /// @notice A node action that misbehaves in one chosen way. Otherwise it passes its input through.
 contract BadAction is INodeAction {
@@ -70,36 +69,6 @@ contract BadAction is INodeAction {
     }
 
     function postconditions(address, Plan calldata) external pure returns (Action[] memory) {}
-}
-
-/// @notice A splitter that allocates 1 wei more than it was given
-contract OverAllocatingSplitter is ISplitter {
-    address public immutable dao;
-
-    constructor(address _dao) {
-        dao = _dao;
-    }
-
-    function split(uint256 _amount) external pure returns (Allocation[] memory _allocations) {
-        _allocations = new Allocation[](1);
-        _allocations[0] = Allocation({recipient: address(0xBEEF), amount: _amount + 1});
-    }
-}
-
-/// @notice Lists the same recipient twice, splitting the amount 50/50 between the two entries
-contract DuplicateRecipientSplitter is ISplitter {
-    address public immutable dao;
-    address public immutable recipient;
-
-    constructor(address _dao, address _recipient) {
-        (dao, recipient) = (_dao, _recipient);
-    }
-
-    function split(uint256 _amount) external view returns (Allocation[] memory _allocations) {
-        _allocations = new Allocation[](2);
-        _allocations[0] = Allocation({recipient: recipient, amount: _amount / 2});
-        _allocations[1] = Allocation({recipient: recipient, amount: _amount - _amount / 2});
-    }
 }
 
 /// @notice USDT-family failure mode: after `successfulTransfers` transfers, `transfer` returns

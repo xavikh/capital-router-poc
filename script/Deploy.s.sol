@@ -11,10 +11,8 @@ import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
 import {TransferAction} from "../src/actions/TransferAction.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
-import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";
-import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
 import {Recipes} from "./Recipes.sol";
 
 /// @notice Deploys every component implementation, a registry naming them and the plugin setup.
@@ -30,17 +28,15 @@ contract Deploy is Script {
     }
 
     function deploy(IDAO _managingDao) public returns (ComponentRegistry registry, CapitalPipelinePluginSetup setup) {
-        ComponentRegistry.Registration[] memory _components = new ComponentRegistry.Registration[](10);
+        ComponentRegistry.Registration[] memory _components = new ComponentRegistry.Registration[](8);
         _components[0] = _registration(Recipes.FUNDED_STREAM_BUDGET, address(new FundedStreamBudget()));
         _components[1] = _registration(Recipes.BALANCE_BUDGET, address(new BalanceBudget()));
         _components[2] = _registration(Recipes.OPEN_FILL, address(new OpenFillAction()));
         _components[3] = _registration(Recipes.MERKLE_CLAIM, address(new MerkleClaimAction()));
         _components[4] = _registration(Recipes.TRANSFER, address(new TransferAction()));
         _components[5] = _registration(Recipes.TRANSFER_TO_BENEFICIARY, address(new TransferToBeneficiaryAction()));
-        _components[6] = _registration(Recipes.SPLIT_TRANSFER, address(new SplitTransferAction()));
-        _components[7] = _registration(Recipes.BURN, address(new BurnAction()));
-        _components[8] = _registration(Recipes.KEEP, address(new KeepAction()));
-        _components[9] = _registration(Recipes.RATIO_SPLITTER, address(new RatioSplitter()));
+        _components[6] = _registration(Recipes.BURN, address(new BurnAction()));
+        _components[7] = _registration(Recipes.KEEP, address(new KeepAction()));
 
         registry = new ComponentRegistry(_managingDao, _components);
         setup = new CapitalPipelinePluginSetup(registry);

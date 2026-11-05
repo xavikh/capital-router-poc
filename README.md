@@ -30,13 +30,11 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/actions/MerkleClaimAction.sol` | Cumulative Merkle claims with a redirectable beneficiary (root only) |
 | `src/actions/TransferAction.sol` | Leaf: sends its input to a fixed recipient |
 | `src/actions/TransferToBeneficiaryAction.sol` | Leaf: sends its input to the flow's beneficiary |
-| `src/actions/SplitTransferAction.sol` | Leaf: pays a dynamic list of recipients from a splitter |
 | `src/actions/BurnAction.sol` | Leaf: burns its input |
 | `src/actions/KeepAction.sol` | Leaf: leaves its input in the DAO |
-| `src/splitters/RatioSplitter.sol` | Fixed-ratio recipient list for `SplitTransferAction` |
 | `src/registry/ComponentRegistry.sol` | Write-once ids for the implementations recipes can clone |
 | `src/setup/CapitalPipelinePluginSetup.sol` | Installs any flow from a recipe |
-| `script/Recipes.sol` | Recipes for swap and split, buyback, Merkle claim and payroll |
+| `script/Recipes.sol` | Recipes for buyback, Merkle claim and payroll |
 | `script/Deploy.s.sol` | Deploys every implementation, the registry and the setup |
 
 ## Permissions

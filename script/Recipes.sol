@@ -10,12 +10,9 @@ import {OpenFillAction} from "../src/actions/OpenFillAction.sol";
 import {MerkleClaimAction} from "../src/actions/MerkleClaimAction.sol";
 import {TransferAction} from "../src/actions/TransferAction.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
-import {SplitTransferAction} from "../src/actions/SplitTransferAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
-import {RatioSplitter} from "../src/splitters/RatioSplitter.sol";
 import {IBudget, ICheckpointedBudget} from "../src/interfaces/IBudget.sol";
 import {INodeAction} from "../src/interfaces/INodeAction.sol";
-import {ISplitter} from "../src/interfaces/ISplitter.sol";
 import {Node} from "../src/lib/types.sol";
 import {
     TRIGGER_PERMISSION_ID,
@@ -36,10 +33,8 @@ library Recipes {
     bytes32 internal constant MERKLE_CLAIM = "MerkleClaimAction@1";
     bytes32 internal constant TRANSFER = "TransferAction@1";
     bytes32 internal constant TRANSFER_TO_BENEFICIARY = "TransferToBeneficiaryAction@1";
-    bytes32 internal constant SPLIT_TRANSFER = "SplitTransferAction@1";
     bytes32 internal constant BURN = "BurnAction@1";
     bytes32 internal constant KEEP = "KeepAction@1";
-    bytes32 internal constant RATIO_SPLITTER = "RatioSplitter@1";
 
     address internal constant ANY_ADDR = address(type(uint160).max);
 
@@ -56,36 +51,6 @@ library Recipes {
         uint256 minDemandedPerOffered;
     }
 
-    /// @notice Stream → OpenFill → pay a ratio list.
-    ///         Components: 0 budget, 1 OpenFill, 2 RatioSplitter, 3 SplitTransfer.
-    function swapAndSplit(
-        address _manager,
-        Stream memory _stream,
-        Swap memory _swap,
-        address[] memory _recipients,
-        uint32[] memory _ratios
-    ) internal pure returns (CapitalPipelinePluginSetup.InstallParams memory _params) {
-        _params.components = new CapitalPipelinePluginSetup.Component[](4);
-        _params.components[0] = _streamBudget(_stream);
-        _params.components[1] = _openFill(_swap);
-        _params.components[2] = _ratio(_recipients, _ratios);
-        _params.components[3] = _splitTransfer(2);
-
-        _params.budget = IBudget(ref(0));
-        _params.nodes = new Node[](2);
-        _params.nodes[0] = _then(1, 1);
-        _params.nodes[1] = _leaf(3);
-
-        _params.grants = new CapitalPipelinePluginSetup.Grant[](7);
-        _params.grants[0] = _grant(PLUGIN_REF, ANY_ADDR, TRIGGER_PERMISSION_ID);
-        _params.grants[1] = _grant(PLUGIN_REF, _manager, MANAGER_PERMISSION_ID);
-        _params.grants[2] = _grant(ref(0), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[3] = _grant(ref(1), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[4] = _grant(ref(2), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[5] = _grant(ref(0), DAO_REF, CHECKPOINT_PERMISSION_ID);
-        _params.grants[6] = _grant(ref(0), ref(1), CHECKPOINT_PERMISSION_ID);
-    }
-
     /// @notice Stream → OpenFill → burn the proceeds, except `_feeWeight` (of RATIO_BASE) to `_fee`.
     ///         Components: 0 budget, 1 OpenFill, 2 Burn, 3 Transfer.
     function buyback(address _manager, Stream memory _stream, Swap memory _swap, address _fee, uint32 _feeWeight)
@@ -97,7 +62,7 @@ library Recipes {
         _params.components[0] = _streamBudget(_stream);
         _params.components[1] = _openFill(_swap);
         _params.components[2] = _component(BURN, abi.encodeCall(BurnAction.initialize, (IDAO(DAO_REF))));
-        _params.components[3] = _component(TRANSFER, abi.encodeCall(TransferAction.initialize, (IDAO(DAO_REF), _fee)));
+        _params.components[3] = _transfer(_fee);
 
         _params.budget = IBudget(ref(0));
         _params.nodes = new Node[](3);
@@ -147,28 +112,32 @@ library Recipes {
         _params.grants[3] = _grant(ref(1), DAO_REF, RECORD_CLAIM_PERMISSION_ID);
     }
 
-    /// @notice Stream → pay a ratio list.
-    ///         Components: 0 budget, 1 RatioSplitter, 2 SplitTransfer.
-    function payroll(address _manager, Stream memory _stream, address[] memory _recipients, uint32[] memory _ratios)
+    /// @notice Stream → a branch paying each recipient its weight (of RATIO_BASE). Two or more
+    ///         recipients. Components: 0 budget, then one Transfer per recipient.
+    function payroll(address _manager, Stream memory _stream, address[] memory _recipients, uint32[] memory _weights)
         internal
         pure
         returns (CapitalPipelinePluginSetup.InstallParams memory _params)
     {
-        _params.components = new CapitalPipelinePluginSetup.Component[](3);
+        uint256 _count = _recipients.length;
+        _params.components = new CapitalPipelinePluginSetup.Component[](1 + _count);
         _params.components[0] = _streamBudget(_stream);
-        _params.components[1] = _ratio(_recipients, _ratios);
-        _params.components[2] = _splitTransfer(1);
 
         _params.budget = IBudget(ref(0));
-        _params.nodes = new Node[](1);
-        _params.nodes[0] = _leaf(2);
+        _params.nodes = new Node[](1 + _count);
+        _params.nodes[0].children = new uint32[](_count); // no action: the root only splits
+        _params.nodes[0].weights = _weights;
+        for (uint256 i; i < _count; ++i) {
+            _params.components[1 + i] = _transfer(_recipients[i]);
+            _params.nodes[0].children[i] = uint32(1 + i);
+            _params.nodes[1 + i] = _leaf(1 + i);
+        }
 
-        _params.grants = new CapitalPipelinePluginSetup.Grant[](5);
+        _params.grants = new CapitalPipelinePluginSetup.Grant[](4);
         _params.grants[0] = _grant(PLUGIN_REF, ANY_ADDR, TRIGGER_PERMISSION_ID);
         _params.grants[1] = _grant(PLUGIN_REF, _manager, MANAGER_PERMISSION_ID);
         _params.grants[2] = _grant(ref(0), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[3] = _grant(ref(1), _manager, MANAGER_PERMISSION_ID);
-        _params.grants[4] = _grant(ref(0), DAO_REF, CHECKPOINT_PERMISSION_ID);
+        _params.grants[3] = _grant(ref(0), DAO_REF, CHECKPOINT_PERMISSION_ID);
     }
 
     // Components
@@ -200,19 +169,8 @@ library Recipes {
         );
     }
 
-    function _ratio(address[] memory _recipients, uint32[] memory _ratios)
-        private
-        pure
-        returns (CapitalPipelinePluginSetup.Component memory)
-    {
-        return
-            _component(RATIO_SPLITTER, abi.encodeCall(RatioSplitter.initialize, (IDAO(DAO_REF), _recipients, _ratios)));
-    }
-
-    function _splitTransfer(uint256 _splitter) private pure returns (CapitalPipelinePluginSetup.Component memory) {
-        return _component(
-            SPLIT_TRANSFER, abi.encodeCall(SplitTransferAction.initialize, (IDAO(DAO_REF), ISplitter(ref(_splitter))))
-        );
+    function _transfer(address _to) private pure returns (CapitalPipelinePluginSetup.Component memory) {
+        return _component(TRANSFER, abi.encodeCall(TransferAction.initialize, (IDAO(DAO_REF), _to)));
     }
 
     function _component(bytes32 _id, bytes memory _initData)
