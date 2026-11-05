@@ -34,7 +34,10 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/actions/BurnAction.sol` | Leaf: burns its input |
 | `src/actions/KeepAction.sol` | Leaf: leaves its input in the DAO |
 | `src/splitters/RatioSplitter.sol` | Fixed-ratio recipient list for `SplitTransferAction` |
-| `src/setup/CapitalPipelinePluginSetup.sol` | Installs the swap-and-split flow |
+| `src/registry/ComponentRegistry.sol` | Write-once ids for the implementations recipes can clone |
+| `src/setup/CapitalPipelinePluginSetup.sol` | Installs any flow from a recipe |
+| `script/Recipes.sol` | Recipes for swap and split, buyback, Merkle claim and payroll |
+| `script/Deploy.s.sol` | Deploys every implementation, the registry and the setup |
 
 ## Permissions
 
@@ -45,6 +48,9 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `MANAGER_PERMISSION_ID` | manager | parameter setters, Merkle `setRoot()`, `pause()`, `unpause()` |
 | `CHECKPOINT_PERMISSION_ID` | DAO, swap action | restarting the stream budget |
 | `RECORD_CLAIM_PERMISSION_ID` | DAO | Merkle `recordClaim()`, run by the plugin through the DAO |
+| `REGISTER_PERMISSION_ID` | picked by the managing DAO | registering new components |
+
+The setup always grants `EXECUTE` and `CONFIGURE`; a recipe lists the rest.
 
 ## Develop
 
@@ -55,3 +61,12 @@ forge test
 ```
 
 Never set `via_ir = true`; fix stack-too-deep errors by restructuring the code.
+
+## Deploy
+
+```shell
+MANAGING_DAO=0x... forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast
+```
+
+Then install a flow by calling `prepareInstallation` with a recipe from `script/Recipes.sol`.
+Every component is a fresh clone bound to the installing DAO.
