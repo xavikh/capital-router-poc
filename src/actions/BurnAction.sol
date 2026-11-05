@@ -7,7 +7,7 @@ import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol"
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {Input, Movement} from "../lib/types.sol";
 import {NATIVE} from "../lib/tokens.sol";
-import {LeafAction} from "./LeafAction.sol";
+import {LeafAction} from "./base/LeafAction.sol";
 
 /// @title BurnAction
 /// @notice Leaf that burns its whole input with `ERC20Burnable.burn`, lowering the total supply

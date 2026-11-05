@@ -5,7 +5,7 @@ import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
 import {Input, Movement} from "../lib/types.sol";
-import {LeafAction} from "./LeafAction.sol";
+import {LeafAction} from "./base/LeafAction.sol";
 
 /// @title KeepAction
 /// @notice Leaf that leaves its whole input in the DAO, so keeping funds is an explicit choice

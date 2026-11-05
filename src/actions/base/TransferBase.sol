@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
-import {INodeAction} from "../interfaces/INodeAction.sol";
+import {INodeAction} from "../../interfaces/INodeAction.sol";
 import {LeafAction} from "./LeafAction.sol";
-import {Input, Movement} from "../lib/types.sol";
-import {tokenBalance, transferAction} from "../lib/tokens.sol";
+import {Input, Movement} from "../../lib/types.sol";
+import {tokenBalance, transferAction} from "../../lib/tokens.sol";
 
 /// @title TransferBase
 /// @notice Leaf that sends its whole input to one recipient. Postcondition: the recipient's balance

@@ -28,7 +28,7 @@ Design: [`docs/plans/2026-11-04-capital-pipeline-design.md`](docs/plans/2026-11-
 | `src/budgets/BalanceBudget.sol` | The DAO's whole balance of a token |
 | `src/actions/OpenFillAction.sol` | Open-fill swap with Dutch-auction pricing (root only) |
 | `src/actions/MerkleClaimAction.sol` | Cumulative Merkle claims with a redirectable beneficiary (root only) |
-| `src/actions/LeafAction.sol` | Base for leaves: spends the whole input, outputs nothing |
+| `src/actions/base/LeafAction.sol` | Base for leaves: spends the whole input, outputs nothing |
 | `src/actions/TransferAction.sol` | Leaf: sends its input to a fixed recipient |
 | `src/actions/TransferToBeneficiaryAction.sol` | Leaf: sends its input to the flow's beneficiary |
 | `src/actions/BurnAction.sol` | Leaf: burns its input |

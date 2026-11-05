@@ -5,9 +5,9 @@ import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol"
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
-import {INodeAction} from "../interfaces/INodeAction.sol";
-import {IBudget} from "../interfaces/IBudget.sol";
-import {Input, Movement} from "../lib/types.sol";
+import {INodeAction} from "../../interfaces/INodeAction.sol";
+import {IBudget} from "../../interfaces/IBudget.sol";
+import {Input, Movement} from "../../lib/types.sol";
 
 /// @title LeafAction
 /// @notice Base for leaves: actions that consume their whole input and output nothing. Not bound to

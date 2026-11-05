@@ -8,7 +8,7 @@ import {ProxyLib} from "@aragon/osx-commons-contracts/src/utils/deployment/Proxy
 import {CapitalPipelinePlugin} from "../src/CapitalPipelinePlugin.sol";
 import {BalanceBudget} from "../src/budgets/BalanceBudget.sol";
 import {TransferAction} from "../src/actions/TransferAction.sol";
-import {TransferBase} from "../src/actions/TransferBase.sol";
+import {TransferBase} from "../src/actions/base/TransferBase.sol";
 import {TransferToBeneficiaryAction} from "../src/actions/TransferToBeneficiaryAction.sol";
 import {BurnAction} from "../src/actions/BurnAction.sol";
 import {KeepAction} from "../src/actions/KeepAction.sol";

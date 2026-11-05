@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
-import {TransferBase} from "./TransferBase.sol";
+import {TransferBase} from "./base/TransferBase.sol";
 
 /// @title TransferToBeneficiaryAction
 /// @notice Leaf that sends its whole input to the flow's beneficiary (set by a claim at the root)
