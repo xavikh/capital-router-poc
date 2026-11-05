@@ -142,8 +142,7 @@ contract BalanceBudgetTest is Fixture {
     }
 
     function test_CommitsNothing() public {
-        Movement memory _root;
-        assertEq(_deployBalanceBudget(tokenA).commitActions(_root).length, 0);
+        assertEq(_deployBalanceBudget(tokenA).commitActions().length, 0);
     }
 
     function test_RevertWhen_TokenHasNoCode() public {

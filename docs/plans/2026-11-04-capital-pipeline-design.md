@@ -50,7 +50,7 @@ struct Node { INodeAction action; uint32[] children; uint32[] weights; }
 interface IBudget {
     function token() external view returns (IERC20);
     function available() external view returns (uint256);
-    function commitActions(Movement calldata root) external view returns (Action[] memory);  // once, at the end
+    function commitActions() external view returns (Action[] memory);  // once, at the end
 }
 
 interface INodeAction {
@@ -74,7 +74,7 @@ interface INodeAction {
 ```
 trigger(bytes[] data)                                   nonReentrant, whenNotPaused, auth(TRIGGER)
   run(node 0, input = { budget.token(), budget.available() })
-  dao.execute(budget.commitActions(root movement))      once, after the whole tree
+  dao.execute(budget.commitActions())                  once, after the whole tree
 
 run(node, input)                                        depth first
   input == 0                     → revert EmptyInput
@@ -141,6 +141,8 @@ Rejected shapes: a bound action below the root (`BudgetMismatch`), weights not s
 - `BalanceBudget`: the DAO's whole balance of a token; commits nothing.
 
 ### Actions
+
+Leaves share `LeafAction`: a locked implementation, no bound budget, and a movement that spends the whole input and outputs nothing.
 
 | Action | Kind | Behaviour |
 |---|---|---|

@@ -3,11 +3,8 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
-import {
-    DaoAuthorizableUpgradeable
-} from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {INodeAction} from "../interfaces/INodeAction.sol";
-import {IBudget} from "../interfaces/IBudget.sol";
+import {LeafAction} from "./LeafAction.sol";
 import {Input, Movement} from "../lib/types.sol";
 import {tokenBalance, transferAction} from "../lib/tokens.sol";
 
@@ -15,15 +12,9 @@ import {tokenBalance, transferAction} from "../lib/tokens.sol";
 /// @notice Leaf that sends its whole input to one recipient. Postcondition: the recipient's balance
 ///         rose by the amount, which catches tokens that return false instead of reverting.
 /// @dev Native ETH works too. Fee-on-transfer and rebasing tokens fail the postcondition by design.
-abstract contract TransferBase is INodeAction, DaoAuthorizableUpgradeable {
+abstract contract TransferBase is LeafAction {
     /// @notice Thrown when a recipient holds less than it should after the transfer
     error ReceiptShortfall(IERC20 token, address recipient, uint256 expected, uint256 actual);
-
-    /// @inheritdoc INodeAction
-    function budget() external pure returns (IBudget) {}
-
-    /// @inheritdoc INodeAction
-    function preconditions(address, Input calldata) external view virtual {}
 
     /// @inheritdoc INodeAction
     function build(address, bytes calldata, Input calldata _input)
@@ -32,7 +23,7 @@ abstract contract TransferBase is INodeAction, DaoAuthorizableUpgradeable {
         virtual
         returns (Movement memory _movement, Action[] memory _actions)
     {
-        _movement = Movement(_input.token, _input.amount, _input.token, 0, _input.beneficiary);
+        _movement = _consume(_input);
         _actions = new Action[](1);
         _actions[0] = transferAction(_input.token, _recipient(_input.beneficiary), _input.amount);
     }
@@ -42,6 +33,7 @@ abstract contract TransferBase is INodeAction, DaoAuthorizableUpgradeable {
         external
         view
         virtual
+        override
         returns (Action[] memory _checks)
     {
         address _to = _recipient(_movement.beneficiary);

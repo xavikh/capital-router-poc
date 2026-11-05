@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {
@@ -27,7 +26,7 @@ import {NATIVE, tokenBalance, isToken} from "../lib/tokens.sol";
 ///
 ///      Native ETH (`NATIVE`) works on either side, never both: a native offer is sent as call
 ///      value with the callback (no approvals); a native demand is measured on the DAO's ETH balance.
-contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeable {
+contract OpenFillAction is INodeAction, DaoAuthorizableUpgradeable {
     /// @inheritdoc INodeAction
     IBudget public budget;
 
@@ -108,7 +107,6 @@ contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeabl
         returns (Movement memory _movement, Action[] memory _actions)
     {
         uint256 _offered = Math.min(_input.amount, maxOffered());
-        if (_offered == 0) return (_movement, _actions);
 
         _movement = Movement({
             inToken: _input.token,
@@ -187,7 +185,7 @@ contract OpenFillAction is INodeAction, Initializable, DaoAuthorizableUpgradeabl
     function _setTerms(uint256 _demandPerFill, uint256 _minDemandedPerOffered) internal virtual {
         if (_demandPerFill == 0) revert ZeroDemand();
         if (_minDemandedPerOffered == 0) revert ZeroMinDemandedPerOffered();
-        // Keeps maxOffered() >= 1, so a zero offer always means an empty budget
+        // Keeps maxOffered() >= 1, so a non-empty input always gets an offer
         if (_demandPerFill * EXCHANGE_RATE_SCALE < _minDemandedPerOffered) revert MinDemandedPerOfferedTooHigh();
 
         demandPerFill = _demandPerFill;

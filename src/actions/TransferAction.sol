@@ -13,11 +13,6 @@ contract TransferAction is TransferBase {
     /// @notice Thrown when the recipient is address(0)
     error NoRecipient();
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
-
     function initialize(IDAO _dao, address _to) external initializer {
         if (_to == address(0)) revert NoRecipient();
         __DaoAuthorizableUpgradeable_init(_dao);

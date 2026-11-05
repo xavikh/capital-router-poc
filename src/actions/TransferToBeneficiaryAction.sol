@@ -10,11 +10,6 @@ contract TransferToBeneficiaryAction is TransferBase {
     /// @notice Thrown when no action in the flow set a beneficiary
     error NoBeneficiary();
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
-
     function initialize(IDAO _dao) external initializer {
         __DaoAuthorizableUpgradeable_init(_dao);
     }

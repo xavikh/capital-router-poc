@@ -2,20 +2,18 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {IBudget} from "../interfaces/IBudget.sol";
-import {Movement} from "../lib/types.sol";
 import {tokenBalance, isToken} from "../lib/tokens.sol";
 
 /// @title BalanceBudget
 /// @notice The DAO's whole balance of a token, with nothing to commit. Used where something else
 ///         decides the amount, such as a Merkle claim, and the budget only caps it at what the DAO holds.
-contract BalanceBudget is IBudget, Initializable, DaoAuthorizableUpgradeable {
+contract BalanceBudget is IBudget, DaoAuthorizableUpgradeable {
     /// @inheritdoc IBudget
     IERC20 public token;
 
@@ -40,5 +38,5 @@ contract BalanceBudget is IBudget, Initializable, DaoAuthorizableUpgradeable {
     }
 
     /// @inheritdoc IBudget
-    function commitActions(Movement calldata) external pure returns (Action[] memory) {}
+    function commitActions() external pure returns (Action[] memory) {}
 }

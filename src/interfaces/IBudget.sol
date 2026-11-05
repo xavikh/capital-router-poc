@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
-import {Movement} from "../lib/types.sol";
 
 /// @title IBudget
 /// @notice How much of a token a flow may spend right now
@@ -17,8 +16,8 @@ interface IBudget {
     function available() external view returns (uint256);
 
     /// @notice DAO actions that record the spend. The plugin executes them once, in their own
-    ///         `dao.execute`, after the whole tree ran, passing the root's movement.
-    function commitActions(Movement calldata root) external view returns (Action[] memory);
+    ///         `dao.execute`, after the whole tree ran.
+    function commitActions() external view returns (Action[] memory);
 }
 
 /// @title ICheckpointedBudget

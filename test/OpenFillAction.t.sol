@@ -51,13 +51,6 @@ contract OpenFillActionTest is Fixture {
         assertEq(_actions[2].data, abi.encodeCall(IERC20.approve, (filler, 0)));
     }
 
-    function test_BuildReturnsNothingForAnEmptyBudget() public view {
-        (Movement memory _movement, Action[] memory _actions) = action.build(filler, "", _input(0));
-
-        assertEq(_movement.inAmount, 0);
-        assertEq(_actions.length, 0);
-    }
-
     function test_PostconditionsAssertTheDaoReceivedTheDemand() public view {
         (Movement memory _movement,) = action.build(filler, "", _input(10 ether));
         Action[] memory _checks = action.postconditions(filler, _movement);

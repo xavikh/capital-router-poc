@@ -82,8 +82,8 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
         if (_data.length != 0 && _data.length != _len) revert DataLengthMismatch(_len, _data.length);
 
         uint256 _callNonce = _nonce++;
-        Movement memory _root = _runNode(0, Input(budget.token(), budget.available(), address(0)), _data, _callNonce);
-        _commitBudget(_root, _callNonce);
+        _runNode(0, Input(budget.token(), budget.available(), address(0)), _data, _callNonce);
+        _commitBudget(_callNonce);
     }
 
     /// @notice Replaces the flow. DAO only: an action can return arbitrary DAO actions.
@@ -107,14 +107,12 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
 
     // Running the tree
 
-    /// @dev Runs node `_index` on `_input`, then its children, depth first. Returns the node's movement.
-    function _runNode(uint256 _index, Input memory _input, bytes[] calldata _data, uint256 _callNonce)
-        internal
-        returns (Movement memory _movement)
-    {
+    /// @dev Runs node `_index` on `_input`, then its children, depth first
+    function _runNode(uint256 _index, Input memory _input, bytes[] calldata _data, uint256 _callNonce) internal {
         if (_input.amount == 0) revert EmptyInput(_index);
 
         Node storage _node = _nodes[_index];
+        Movement memory _movement;
         if (address(_node.action) == address(0)) {
             // A branch without an action passes its input on
             _movement = Movement(_input.token, _input.amount, _input.token, _input.amount, _input.beneficiary);
@@ -198,8 +196,8 @@ contract CapitalPipelinePlugin is PluginCloneable, PausableUpgradeable, Reentran
     }
 
     /// @dev After the whole tree ran, so a stream checkpoint sees the final balance
-    function _commitBudget(Movement memory _root, uint256 _callNonce) internal {
-        Action[] memory _actions = budget.commitActions(_root);
+    function _commitBudget(uint256 _callNonce) internal {
+        Action[] memory _actions = budget.commitActions();
         if (_actions.length == 0) return;
 
         bytes32 _executionId = keccak256(abi.encode(address(this), _callNonce, type(uint256).max));

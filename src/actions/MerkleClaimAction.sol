@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {
@@ -27,7 +26,7 @@ import {MANAGER_PERMISSION_ID, RECORD_CLAIM_PERMISSION_ID} from "../lib/constant
 ///      of the other nodes or front-run a redirect. `beneficiary == 0` pays the account.
 ///      Relayed (gasless) claims could be added later with a signature from the account over the
 ///      beneficiary and the data of every node.
-contract MerkleClaimAction is INodeAction, Initializable, DaoAuthorizableUpgradeable {
+contract MerkleClaimAction is INodeAction, DaoAuthorizableUpgradeable {
     /// @inheritdoc INodeAction
     IBudget public budget;
 

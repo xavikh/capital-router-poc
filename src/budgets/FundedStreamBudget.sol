@@ -4,14 +4,12 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {
     DaoAuthorizableUpgradeable
 } from "@aragon/osx-commons-contracts/src/permission/auth/DaoAuthorizableUpgradeable.sol";
 import {ICheckpointedBudget} from "../interfaces/IBudget.sol";
-import {Movement} from "../lib/types.sol";
 import {tokenBalance, isToken} from "../lib/tokens.sol";
 import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.sol";
 
@@ -52,7 +50,7 @@ import {MANAGER_PERMISSION_ID, CHECKPOINT_PERMISSION_ID} from "../lib/constants.
 ///      token should include a `sync()` action.
 ///
 ///      One flow per instance.
-contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizableUpgradeable {
+contract FundedStreamBudget is ICheckpointedBudget, DaoAuthorizableUpgradeable {
     /// @notice The token streamed
     IERC20 public token;
 
@@ -141,7 +139,7 @@ contract FundedStreamBudget is ICheckpointedBudget, Initializable, DaoAuthorizab
     }
 
     /// @notice Restarts the stream after the spend: the plugin executes this once, after the whole flow
-    function commitActions(Movement calldata) external view virtual returns (Action[] memory _actions) {
+    function commitActions() external view virtual returns (Action[] memory _actions) {
         _actions = new Action[](1);
         _actions[0] = Action({to: address(this), value: 0, data: abi.encodeCall(this.writeCheckpoint, ())});
     }
