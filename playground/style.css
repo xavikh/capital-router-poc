@@ -8,7 +8,7 @@
   --ok: #1d7a3e;
   --bad: #b3261e;
   --on-accent: #ffffff;
-  --budget: #2f8f5b;
+  --budget: #23784b;
   --root: #2f5bea;
   --branch: #8a6d1f;
   --leaf: #8b4bb8;
@@ -113,13 +113,9 @@ details summary { cursor: pointer; }
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-left: 4px solid var(--leaf);
   border-radius: 6px;
   box-shadow: none;
 }
-.drawflow .drawflow-node.budget { border-left-color: var(--budget); }
-.drawflow .drawflow-node.root { border-left-color: var(--root); }
-.drawflow .drawflow-node.branch { border-left-color: var(--branch); }
 .drawflow .drawflow-node.selected { background: var(--panel); border-color: var(--accent); color: var(--text); }
 .drawflow .drawflow-node .input, .drawflow .drawflow-node .output {
   width: 14px; height: 14px; background: var(--panel); border: 2px solid var(--accent);
@@ -127,7 +123,11 @@ details summary { cursor: pointer; }
 .drawflow .connection .main-path { stroke: var(--accent); stroke-width: 3px; }
 .drawflow .connection .main-path.selected { stroke: var(--bad); }
 .box-title { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
-.box-kind { font-weight: 400; font-size: 11px; color: var(--muted); }
+.box-kind { font-weight: 500; font-size: 11px; color: var(--leaf); }
+.box-kind::before { content: "● "; }
+.budget .box-kind { color: var(--budget); }
+.root .box-kind { color: var(--root); }
+.branch .box-kind { color: var(--branch); }
 .drawflow-node label { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; }
 .drawflow-node input { width: 100%; font-size: 12px; }
 .drawflow-node label.share { color: var(--text); }
